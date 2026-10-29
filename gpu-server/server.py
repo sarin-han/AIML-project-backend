@@ -75,6 +75,110 @@ class ExportSegment(BaseModel):
 class ExportRequest(BaseModel):
     video_path: str
     segments: List[ExportSegment]
+    # 편집된 타임라인(구간 순서, 배속 반영) 기준 자막. 있으면 내보낸 영상에 자막을 입힌다.
+    subtitle_cues: Optional[List["ExportSubtitleCue"]] = None
+    subtitle_style: Optional["SubtitleStyle"] = None
+
+class ExportSubtitleCue(BaseModel):
+    start: float
+    end: float
+    text: str
+    top: Optional[str] = None   # 두 언어 표시일 때 위에 놓는 원문
+    x: Optional[float] = None   # 자막 가운데의 가로 위치(영상 가로 대비 %). 없으면 가운데
+    y: Optional[float] = None   # 영상 아래쪽에서 자막 아래끝까지의 거리(세로 대비 %). 없으면 스타일 기본 위치
+
+class SubtitleStyle(BaseModel):
+    font: str = "nanum-gothic"
+    size: float = 3.5        # 영상 세로 길이 대비 글자 크기(%)
+    position: float = 8.0    # 영상 아래쪽에서 자막까지의 거리(세로 길이 대비 %)
+    color: str = "#FFFFFF"
+    box: bool = False        # True면 글자 뒤에 반투명 검정 박스
+
+ExportRequest.model_rebuild()
+
+SUBTITLE_FONTS_DIR = os.environ.get("SUBTITLE_FONTS_DIR", "/shareHost/jiyes/fonts")
+# id -> (libass FontName, Bold 플래그). 폰트 파일은 SUBTITLE_FONTS_DIR에 있다.
+SUBTITLE_FONTS = {
+    "nanum-gothic": ("NanumGothic", 1),
+    "nanum-gothic-xbold": ("NanumGothicExtraBold", 0),
+    "gothic-a1": ("Gothic A1", 1),
+    "gothic-a1-black": ("Gothic A1 Black", 0),
+    "plex-kr": ("IBM Plex Sans KR", 1),
+    "nanum-myeongjo": ("NanumMyeongjo", 1),
+    "black-han-sans": ("Black Han Sans", 0),
+    "do-hyeon": ("Do Hyeon", 0),
+    "jua": ("Jua", 0),
+    "gowun-dodum": ("Gowun Dodum", 0),
+    "nanum-pen": ("Nanum Pen", 0),
+}
+
+def get_video_size(ffprobe: str, video_path: str) -> tuple[int, int]:
+    import subprocess
+    result = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", video_path],
+        capture_output=True, text=True,
+    )
+    try:
+        width, height = result.stdout.strip().split("x")
+        return int(width), int(height)
+    except ValueError:
+        return 1080, 1920
+
+def validate_subtitle_style(style: "SubtitleStyle") -> None:
+    if style.font not in SUBTITLE_FONTS:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 자막 폰트입니다: {style.font}")
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", style.color):
+        raise HTTPException(status_code=400, detail="자막 색상은 #RRGGBB 형식이어야 합니다.")
+
+def ass_color(hex_color: str, alpha: str = "00") -> str:
+    return f"&H{alpha}{hex_color[5:7]}{hex_color[3:5]}{hex_color[1:3]}"
+
+def ass_time(seconds: float) -> str:
+    centis = round(max(0.0, seconds) * 100)
+    return f"{centis // 360000}:{centis // 6000 % 60:02d}:{centis // 100 % 60:02d}.{centis % 100:02d}"
+
+def ass_text(value: str) -> str:
+    return value.replace("{", "").replace("}", "").replace("\\", "").replace("\r", "").strip().replace("\n", "\\N")
+
+def build_ass(cues: List["ExportSubtitleCue"], style: "SubtitleStyle", width: int, height: int) -> str:
+    """자막을 ASS 파일 내용으로 만든다. 좌표계를 실제 영상 픽셀로 맞추고, 자막별 위치는 \\pos로 지정한다."""
+    validate_subtitle_style(style)
+    font_name, bold = SUBTITLE_FONTS[style.font]
+    font_size = round(min(max(style.size, 1.0), 12.0) / 100 * height)
+    margin_h = round(width * 0.05)
+    margin_v = round(min(max(style.position, 0.0), 95.0) / 100 * height)
+    border_style, outline_color, outline = (3, ass_color("#000000", "80"), max(2, round(height * 0.006))) if style.box else (1, ass_color("#000000"), max(1, round(height * 0.0035)))
+    primary = ass_color(style.color)
+
+    lines = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        f"PlayResX: {width}",
+        f"PlayResY: {height}",
+        "WrapStyle: 0",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        f"Style: Default,{font_name},{font_size},{primary},{primary},{outline_color},&H00000000,{-1 if bold else 0},0,0,0,100,100,0,0,{border_style},{outline},0,2,{margin_h},{margin_h},{margin_v},1",
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    for cue in cues:
+        text = ass_text(cue.text)
+        if not text and not cue.top:
+            continue
+
+        body = text
+        if cue.top and ass_text(cue.top):
+            body = f"{{\\c{ass_color('#CCCCCC')}&}}{ass_text(cue.top)}\\N{{\\c{primary}&}}{text}"
+        if cue.x is not None or cue.y is not None:
+            x = min(max(cue.x if cue.x is not None else 50.0, 0.0), 100.0) / 100 * width
+            y = height - min(max(cue.y if cue.y is not None else style.position, 0.0), 100.0) / 100 * height
+            body = f"{{\\an2\\pos({x:.0f},{y:.0f})}}{body}"
+        lines.append(f"Dialogue: 0,{ass_time(cue.start)},{ass_time(cue.end)},Default,,0,0,0,,{body}")
+
+    return "\n".join(lines) + "\n"
 
 class AnalysisJobStartResponse(BaseModel):
     status: str
@@ -348,6 +452,76 @@ async def get_analyze_job(job_id: str):
             "video_path": job.get("video_path"),
         }
 
+class TranscribeRequest(BaseModel):
+    video_path: str
+    language: Optional[str] = "ko"
+
+transcribe_jobs = {}
+transcribe_jobs_lock = threading.Lock()
+transcribe_run_lock = threading.Lock()
+
+def update_transcribe_job(job_id: str, **fields):
+    with transcribe_jobs_lock:
+        job = transcribe_jobs.get(job_id)
+        if job:
+            job.update(fields)
+            job["updated_at"] = time.time()
+
+def run_transcribe_job(job_id: str, request: TranscribeRequest):
+    try:
+        from subtitle.whisper_stt import transcribe_video
+
+        ffmpeg, _ = get_ffmpeg_paths()
+        update_transcribe_job(job_id, status="running", message="음성을 인식하는 중입니다.")
+
+        with transcribe_run_lock:
+            segments = transcribe_video(
+                ffmpeg,
+                request.video_path,
+                language=request.language or None,
+                on_progress=lambda ratio: update_transcribe_job(job_id, progress=int(ratio * 100)),
+            )
+
+        update_transcribe_job(
+            job_id,
+            status="success",
+            progress=100,
+            message="자막 생성이 완료됐습니다.",
+            segments=segments,
+        )
+    except Exception as error:
+        import traceback
+        traceback.print_exc()
+        update_transcribe_job(job_id, status="error", error=str(error), message="자막 생성에 실패했습니다.")
+
+@app.post("/transcribe/jobs")
+async def start_transcribe_job(request: TranscribeRequest):
+    if not os.path.isfile(request.video_path):
+        raise HTTPException(status_code=404, detail="영상 파일을 찾을 수 없습니다. 영상을 다시 분석해 주세요.")
+
+    job_id = uuid.uuid4().hex
+    with transcribe_jobs_lock:
+        transcribe_jobs[job_id] = {
+            "status": "queued",
+            "progress": 0,
+            "message": "자막 생성 대기 중입니다.",
+            "segments": [],
+            "error": None,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+        }
+
+    threading.Thread(target=run_transcribe_job, args=(job_id, request), daemon=True).start()
+    return {"status": "queued", "job_id": job_id}
+
+@app.get("/transcribe/jobs/{job_id}")
+async def get_transcribe_job(job_id: str):
+    with transcribe_jobs_lock:
+        job = transcribe_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Transcribe job not found")
+        return {key: job[key] for key in ("status", "progress", "message", "segments", "error")}
+
 @app.post("/analyze")
 async def analyze(request: AnalysisRequest):
     final_results = run_analysis(request)
@@ -413,6 +587,10 @@ async def export_video(request: ExportRequest):
     try:
         if not request.segments:
             raise HTTPException(status_code=400, detail="No segments to export")
+
+        subtitle_cues = [cue for cue in (request.subtitle_cues or []) if cue.end > cue.start]
+        if subtitle_cues:
+            validate_subtitle_style(request.subtitle_style or SubtitleStyle())
 
         source_has_audio = has_audio_stream(request.video_path)
 
@@ -498,11 +676,28 @@ async def export_video(request: ExportRequest):
                 f.write(f"file '{p}'\n")
         
         output_path = f"/tmp/clipcraft_{export_id}_output_final.mp4"
+        concat_path = f"/tmp/clipcraft_{export_id}_concat.mp4" if subtitle_cues else output_path
         subprocess.run([
             ffmpeg, "-y", "-f", "concat", "-safe", "0",
-            "-i", list_file, "-c", "copy", output_path
+            "-i", list_file, "-c", "copy", concat_path
         ], check=True)
-        
+
+        if subtitle_cues:
+            if not os.path.isdir(SUBTITLE_FONTS_DIR):
+                raise HTTPException(status_code=500, detail="자막 폰트 폴더를 찾을 수 없습니다.")
+
+            ass_path = f"/tmp/clipcraft_{export_id}_subtitles.ass"
+            width, height = get_video_size(ffprobe, concat_path)
+            with open(ass_path, "w", encoding="utf-8") as f:
+                f.write(build_ass(subtitle_cues, request.subtitle_style or SubtitleStyle(), width, height))
+            temp_files.extend([concat_path, ass_path])
+
+            subtitle_filter = f"subtitles=filename={ass_path}:fontsdir={SUBTITLE_FONTS_DIR}"
+            subprocess.run([
+                ffmpeg, "-y", "-i", concat_path, "-vf", subtitle_filter,
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "copy", output_path
+            ], check=True, capture_output=True)
+
         return FileResponse(output_path, media_type="video/mp4", filename="clipcraft_export.mp4")
     except HTTPException:
         raise

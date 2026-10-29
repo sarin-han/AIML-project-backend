@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { downloadExportedVideo, requestExportVideo } from '@/api/export';
+import { requestSubtitleSuggestions } from '@/api/suggest';
+import type { SuggestTone } from '@/api/suggest';
+import { translateCuesToKorean } from '@/api/translate';
+import { requestSubtitles } from '@/api/transcribe';
 import { useTheme } from '@/App';
 import Logo from '@/components/Logo';
 import PillButton from '@/components/PillButton';
 import AiAssistant from '@/components/EditorScreen/AiAssistant';
 import HighlightList from '@/components/EditorScreen/HighlightList';
+import SubtitlePanel from '@/components/EditorScreen/SubtitlePanel';
 import PlayerControls, { getScrubPosition } from '@/components/EditorScreen/PlayerControls';
 import VideoPreview from '@/components/EditorScreen/VideoPreview';
 import WaveformTimeline from '@/components/EditorScreen/WaveformTimeline';
 import { applyEditorNaturalLanguageCommand } from '@/lib/editorNaturalLanguageCommands';
+import { buildSrt, downloadTextFile, findActiveCue, getCueLines, loadSubtitles, mapCuesToTimeline, loadSubtitleStyle, saveSubtitles, saveSubtitleStyle } from '@/lib/subtitles';
+import type { SubtitleStyle } from '@/lib/subtitles';
 import { loadDeletedSegmentIds, loadSegmentEditSettings, saveDeletedSegmentIds, saveSegmentEditSettings } from '@/lib/editorStorage';
-import type { EditorHighlightSegment, ExportState, SegmentEditSetting } from '@/types/app';
+import type { EditorHighlightSegment, ExportState, SegmentEditSetting, SubtitleCue } from '@/types/app';
 import type { EditorScreenProps, NaturalLanguageCommandResult } from '@/types/pages/EditorScreen';
 
 const fallbackWaveHeights = Array.from(
@@ -178,6 +185,17 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     filterStoredEditSettings(loadSegmentEditSettings(), analysis?.segments ?? [], loadDeletedSegmentIds()),
   );
   const [segmentThumbnails, setSegmentThumbnails] = useState<Record<number, string>>({});
+  const [subtitles, setSubtitles] = useState<SubtitleCue[]>(() => loadSubtitles(videoPath));
+  const [subtitleGenerating, setSubtitleGenerating] = useState(false);
+  const [subtitleProgress, setSubtitleProgress] = useState(0);
+  const [subtitleLanguage, setSubtitleLanguage] = useState('');
+  const [subtitleTranslate, setSubtitleTranslate] = useState(true);
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(loadSubtitleStyle);
+  const [exportWithSubtitles, setExportWithSubtitles] = useState(true);
+  const [selectedCueId, setSelectedCueId] = useState<number | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [subtitleNotice, setSubtitleNotice] = useState<string | null>(null);
+  const [subtitleError, setSubtitleError] = useState<string | null>(null);
   const [exportToast, setExportToast] = useState<string | null>(null);
   const scrubberRef = useRef<HTMLDivElement>(null);
   const exportToastTimerRef = useRef<number | null>(null);
@@ -199,6 +217,14 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
   useEffect(() => {
     saveSegmentEditSettings(segmentEditSettings);
   }, [segmentEditSettings]);
+
+  useEffect(() => {
+    saveSubtitleStyle(subtitleStyle);
+  }, [subtitleStyle]);
+
+  useEffect(() => {
+    saveSubtitles(videoPath, subtitles);
+  }, [subtitles, videoPath]);
 
   useEffect(() => {
     saveDeletedSegmentIds(deletedSegmentIds);
@@ -374,6 +400,155 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     setProgress((current) => Math.min(1, current + 10 / playbackDuration));
   };
 
+  const currentTime = progress * playbackDuration;
+  const activeCue = findActiveCue(subtitles, currentTime, selectedCueId);
+
+  const onGenerateSubtitles = async () => {
+    if (!videoPath || subtitleGenerating) return;
+
+    setSubtitleGenerating(true);
+    setSubtitleProgress(0);
+    setSubtitleError(null);
+    setSubtitleNotice(null);
+    try {
+      const recognized = await requestSubtitles(videoPath, setSubtitleProgress, subtitleLanguage || null);
+
+      if (recognized.length === 0) {
+        setSubtitles([]);
+        setSubtitleNotice('말소리를 찾지 못했어요. "시나리오로 자막 추천"을 누르거나 자막을 직접 추가해 보세요.');
+        return;
+      }
+
+      if (!subtitleTranslate) {
+        setSubtitles(recognized);
+      } else {
+        try {
+          setSubtitles(await translateCuesToKorean(recognized));
+        } catch (translateError) {
+          console.error(translateError);
+          setSubtitles(recognized);
+          setSubtitleError(`번역하지 못해 원문 자막을 표시합니다. (${translateError instanceof Error ? translateError.message : '알 수 없는 오류'})`);
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : '자막 생성에 실패했습니다.';
+
+      if (message.includes('오디오 추출')) {
+        setSubtitleNotice('이 영상에는 소리가 없어요. "시나리오로 자막 추천"을 누르거나 자막을 직접 추가해 보세요.');
+      } else {
+        setSubtitleError(message);
+      }
+    } finally {
+      setSubtitleGenerating(false);
+    }
+  };
+
+  const onCueChange = (cueId: number, text: string) => {
+    setSubtitles((current) => current.map((cue) => (cue.id === cueId ? { ...cue, text } : cue)));
+  };
+
+  const onCueDelete = (cueId: number) => {
+    setSubtitles((current) => current.filter((cue) => cue.id !== cueId));
+    setSelectedCueId((current) => (current === cueId ? null : current));
+  };
+
+  const onSuggestSubtitles = async (tone: SuggestTone) => {
+    if (segments.length === 0 || suggesting) return;
+
+    setSuggesting(true);
+    setSubtitleError(null);
+    setSubtitleNotice(null);
+    try {
+      const items = segments.map((segment) => ({
+        id: segment.id,
+        scenario: segment.scenario,
+        title: segment.title,
+        duration: segment.end - segment.start,
+        frames: [],
+      }));
+      const captions = await requestSubtitleSuggestions(items, tone, 'scenario');
+      const captionById = new Map(captions.map((caption) => [caption.id, caption.text]));
+
+      setSubtitles((current) => {
+        let nextId = current.reduce((max, cue) => Math.max(max, cue.id), 0) + 1;
+        const added = segments.flatMap((segment) => {
+          const text = captionById.get(segment.id);
+          if (!text) return [];
+
+          const end = Math.min(segment.end, segment.start + 3.5);
+          return [{ id: nextId++, start: segment.start, end: Math.max(end, segment.start + 1), text }];
+        });
+
+        return [...current, ...added].sort((a, b) => a.start - b.start);
+      });
+      setSubtitleNotice(`시나리오대로 ${captions.length}개 구간에 자막을 만들었어요. 문장은 직접 고치고, 시간은 파형 아래 자막 줄에서 조절하세요.`);
+    } catch (error) {
+      console.error(error);
+      setSubtitleError(error instanceof Error ? error.message : '자막 만들기에 실패했습니다.');
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const onCueTimeChange = (cueId: number, edge: 'start' | 'end', time: number) => {
+    if (!Number.isFinite(time)) return;
+
+    const minLength = 0.2;
+    const clamped = Math.min(playbackDuration, Math.max(0, time));
+
+    setSubtitles((current) =>
+      current.map((cue) => {
+        if (cue.id !== cueId) return cue;
+
+        return edge === 'start'
+          ? { ...cue, start: Math.min(clamped, Math.max(0, cue.end - minLength)) }
+          : { ...cue, end: Math.max(clamped, Math.min(playbackDuration, cue.start + minLength)) };
+      }),
+    );
+  };
+
+  const onCueMove = (cueId: number, start: number) => {
+    setSubtitles((current) =>
+      current.map((cue) => {
+        if (cue.id !== cueId) return cue;
+
+        const length = cue.end - cue.start;
+        const nextStart = Math.min(Math.max(0, start), Math.max(0, playbackDuration - length));
+        return { ...cue, start: nextStart, end: nextStart + length };
+      }),
+    );
+  };
+
+  const onCueSelect = (cueId: number) => {
+    setSelectedCueId(cueId);
+
+    const cue = subtitles.find((item) => item.id === cueId);
+    if (cue) {
+      setProgress(Math.min(1, Math.max(0, cue.start / playbackDuration)));
+      setPlaying(false);
+    }
+  };
+
+  const onCuePositionChange = (cueId: number, position: { x: number; y: number }) => {
+    setSubtitles((current) => current.map((cue) => (cue.id === cueId ? { ...cue, x: position.x, y: position.y } : cue)));
+  };
+
+  const onCuePositionReset = (cueId: number) => {
+    setSubtitles((current) =>
+      current.map((cue) => {
+        if (cue.id !== cueId) return cue;
+
+        const { x: _x, y: _y, ...rest } = cue;
+        return rest;
+      }),
+    );
+  };
+
+  const onDownloadSrt = () => {
+    downloadTextFile(buildSrt(subtitles, segments, segmentEditSettings, subtitleStyle.bilingual), 'clipcraft_subtitles.srt');
+  };
+
   const showExportToast = (message: string) => {
     if (exportToastTimerRef.current !== null) window.clearTimeout(exportToastTimerRef.current);
 
@@ -390,7 +565,8 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
 
     setExportState('loading');
     try {
-      const blob = await requestExportVideo(videoPath, segments, segmentEditSettings);
+      const subtitleCues = exportWithSubtitles ? mapCuesToTimeline(subtitles, segments, segmentEditSettings, subtitleStyle.bilingual) : [];
+      const blob = await requestExportVideo(videoPath, segments, segmentEditSettings, subtitleCues.length > 0 ? { cues: subtitleCues, style: subtitleStyle } : undefined);
       downloadExportedVideo(blob);
       setExportState('done');
       showExportToast('내보내기가 완료됐어요');
@@ -434,6 +610,12 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
         <PillButton variant="white" icon="history" small>
           작업 기록
         </PillButton>
+        {subtitles.length > 0 && (
+          <label className="flex cursor-pointer items-center gap-1.5 text-[12.5px] text-[rgba(0,0,0,0.65)]">
+            <input checked={exportWithSubtitles} onChange={(event) => setExportWithSubtitles(event.target.checked)} type="checkbox" />
+            자막 포함
+          </label>
+        )}
         <PillButton
           variant="accent"
           disabled={!videoPath || segments.length === 0}
@@ -454,6 +636,11 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
           onEnded={() => setPlaying(false)}
           onLoadedMetadata={syncVideoMetadata}
           onTimeUpdate={syncVideoProgress}
+          draggable={Boolean(activeCue && activeCue.id === selectedCueId)}
+          onSubtitleMove={(position) => activeCue && onCuePositionChange(activeCue.id, position)}
+          subtitleLines={activeCue ? getCueLines(activeCue, subtitleStyle.bilingual) : undefined}
+          subtitlePosition={activeCue ? { x: activeCue.x, y: activeCue.y } : undefined}
+          subtitleStyle={subtitleStyle}
         />
         <PlayerControls
           accent={accent}
@@ -475,11 +662,17 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
         <WaveformTimeline
           accent={accent}
           duration={duration}
+          activeCueId={activeCue?.id}
+          onCueMove={onCueMove}
+          onCueSelect={setSelectedCueId}
+          selectedCueId={selectedCueId}
+          onCueTimeChange={onCueTimeChange}
           onSegmentChange={onSegmentChange}
           progress={progress}
           segments={segments}
           setPlaying={setPlaying}
           setProgress={setProgress}
+          subtitleCues={subtitles}
           waveHeights={waveHeights}
         />
         <HighlightList
@@ -489,6 +682,30 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
           segmentEditSettings={segmentEditSettings}
           segments={segments}
           thumbnails={segmentThumbnails}
+        />
+        <SubtitlePanel
+          cues={subtitles}
+          disabled={!videoPath}
+          error={subtitleError}
+          generating={subtitleGenerating}
+          language={subtitleLanguage}
+          notice={subtitleNotice}
+          onCueChange={onCueChange}
+          onCueDelete={onCueDelete}
+          onCuePositionReset={onCuePositionReset}
+          onCueSelect={onCueSelect}
+          onDownload={onDownloadSrt}
+          onGenerate={onGenerateSubtitles}
+          onLanguageChange={setSubtitleLanguage}
+          onStyleChange={setSubtitleStyle}
+          onSuggest={onSuggestSubtitles}
+          onTranslateChange={setSubtitleTranslate}
+          progress={subtitleProgress}
+          selectedCueId={selectedCueId}
+          style={subtitleStyle}
+          suggestDisabled={segments.length === 0}
+          suggesting={suggesting}
+          translate={subtitleTranslate}
         />
       </section>
 

@@ -98,3 +98,15 @@ export type ChatMessage =
         };
       };
     };
+
+export interface SubtitleCue {
+  id: number;
+  start: number;
+  end: number;
+  text: string;
+  original?: string;
+  /** 자막 가운데의 가로 위치(영상 가로 대비 %). 없으면 가운데 */
+  x?: number;
+  /** 영상 아래쪽에서 자막까지의 거리(세로 대비 %). 없으면 스타일의 기본 위치 */
+  y?: number;
+}

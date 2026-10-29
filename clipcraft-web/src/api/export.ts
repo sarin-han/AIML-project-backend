@@ -1,4 +1,5 @@
 import { ApiError, getApiUrl } from '@/api/client';
+import type { SubtitleStyle, TimelineCue } from '@/lib/subtitles';
 import type { EditorHighlightSegment, SegmentEditSetting } from '@/types/app';
 
 const DEFAULT_EXPORT_API_URL = '/export';
@@ -11,9 +12,16 @@ export interface ExportVideoRequest {
     speed: number;
     muted: boolean;
   }>;
+  subtitle_cues?: TimelineCue[];
+  subtitle_style?: Pick<SubtitleStyle, 'font' | 'size' | 'position' | 'color' | 'box'>;
 }
 
-export async function requestExportVideo(videoPath: string, segments: EditorHighlightSegment[], segmentEditSettings: SegmentEditSetting[]): Promise<Blob> {
+export interface ExportSubtitles {
+  cues: TimelineCue[];
+  style: SubtitleStyle;
+}
+
+export async function requestExportVideo(videoPath: string, segments: EditorHighlightSegment[], segmentEditSettings: SegmentEditSetting[], subtitles?: ExportSubtitles): Promise<Blob> {
   const endpoint = getApiUrl(import.meta.env.VITE_EXPORT_API_URL, DEFAULT_EXPORT_API_URL);
   const settingsBySegmentId = new Map(segmentEditSettings.map((setting) => [setting.segmentId, setting]));
   const response = await fetch(endpoint, {
@@ -33,6 +41,12 @@ export async function requestExportVideo(videoPath: string, segments: EditorHigh
           muted: editSetting?.muted ?? false,
         };
       }),
+      ...(subtitles && subtitles.cues.length > 0
+        ? {
+            subtitle_cues: subtitles.cues,
+            subtitle_style: { font: subtitles.style.font, size: subtitles.style.size, position: subtitles.style.position, color: subtitles.style.color, box: subtitles.style.box },
+          }
+        : {}),
     } satisfies ExportVideoRequest),
   });
 

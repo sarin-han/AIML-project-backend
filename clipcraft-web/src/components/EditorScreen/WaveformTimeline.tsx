@@ -23,7 +23,22 @@ function buildTimeMarks(duration: number): string[] {
   return Array.from({ length: marks + 1 }, (_, index) => formatTime((duration / marks) * index));
 }
 
-export default function WaveformTimeline({ accent, duration, onSegmentChange, progress, segments, setPlaying, setProgress, waveHeights: heights }: WaveformTimelineProps) {
+export default function WaveformTimeline({
+  accent,
+  activeCueId,
+  duration,
+  onCueMove,
+  onCueSelect,
+  onCueTimeChange,
+  onSegmentChange,
+  progress,
+  segments,
+  selectedCueId,
+  setPlaying,
+  setProgress,
+  subtitleCues,
+  waveHeights: heights,
+}: WaveformTimelineProps) {
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 1;
   const timeMarks = buildTimeMarks(safeDuration);
   const markers = segments.flatMap((segment) => [
@@ -75,6 +90,43 @@ export default function WaveformTimeline({ accent, duration, onSegmentChange, pr
     };
 
     updateTime(event.clientX);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  /** 자막 막대의 가장자리(길이 조절) 또는 몸통(통째로 이동)을 드래그한다. 움직임 없이 놓으면 그 위치로 이동만 한다. */
+  const startCueDrag = (event: MouseEvent<HTMLElement>, cueId: number, mode: 'start' | 'end' | 'move') => {
+    event.preventDefault();
+    event.stopPropagation();
+    setPlaying(false);
+    onCueSelect(cueId);
+
+    const track = event.currentTarget.closest('[data-cue-track]');
+    const cue = subtitleCues.find((item) => item.id === cueId);
+    if (!track || !cue) return;
+
+    const rect = track.getBoundingClientRect();
+    const originX = event.clientX;
+    const originStart = cue.start;
+    let moved = false;
+    const toTime = (clientX: number) => Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)) * safeDuration;
+    const onMove = (moveEvent: globalThis.MouseEvent) => {
+      if (Math.abs(moveEvent.clientX - originX) > 2) moved = true;
+      if (!moved) return;
+
+      if (mode === 'move') {
+        onCueMove(cueId, originStart + ((moveEvent.clientX - originX) / rect.width) * safeDuration);
+      } else {
+        onCueTimeChange(cueId, mode, toTime(moveEvent.clientX));
+        setProgress(toTime(moveEvent.clientX) / safeDuration);
+      }
+    };
+    const onUp = () => {
+      if (!moved) setProgress(originStart / safeDuration);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
@@ -151,6 +203,49 @@ export default function WaveformTimeline({ accent, duration, onSegmentChange, pr
             </div>
           ))}
 
+          <div className="pointer-events-none absolute top-0 bottom-0 z-[4] w-[1.5px]" style={{ background: accent, left: `${progress * 100}%` }} />
+        </div>
+
+        <div className="relative h-[30px] border-t border-[rgba(0,0,0,0.08)] bg-[#faf9f8]" data-cue-track>
+          {subtitleCues.length === 0 && (
+            <span className="absolute inset-0 flex items-center px-2 font-mono text-[7.5px] text-[rgba(0,0,0,0.28)]">자막 · 자막을 만들면 여기에 표시돼요. 막대 끝을 끌어 길이를 조절하세요.</span>
+          )}
+          {subtitleCues.map((cue) => {
+            const left = Math.min(100, Math.max(0, (cue.start / safeDuration) * 100));
+            const width = Math.max(0.6, Math.min(100 - left, ((cue.end - cue.start) / safeDuration) * 100));
+            const active = cue.id === activeCueId;
+            const selected = cue.id === selectedCueId;
+
+            return (
+              <div
+                key={cue.id}
+                className="absolute top-[4px] bottom-[4px] z-[2] flex cursor-grab items-center overflow-hidden rounded-[4px] border"
+                onMouseDown={(event) => startCueDrag(event, cue.id, 'move')}
+                style={{
+                  background: active || selected ? `${accent}33` : 'rgba(0,0,0,0.07)',
+                  borderColor: selected ? accent : active ? `${accent}88` : 'rgba(0,0,0,0.22)',
+                  borderWidth: selected ? 2 : 1,
+                  left: `${left}%`,
+                  width: `${width}%`,
+                }}
+                title={cue.text}
+              >
+                <button
+                  aria-label={`자막 ${cue.id} 시작 조절`}
+                  className="absolute top-0 bottom-0 left-0 z-[3] w-[6px] cursor-ew-resize border-0 bg-transparent p-0 hover:bg-black/20"
+                  onMouseDown={(event) => startCueDrag(event, cue.id, 'start')}
+                  type="button"
+                />
+                <span className="pointer-events-none truncate px-2 text-[8px] leading-none text-[rgba(0,0,0,0.65)]">{cue.text || '(빈 자막)'}</span>
+                <button
+                  aria-label={`자막 ${cue.id} 종료 조절`}
+                  className="absolute top-0 right-0 bottom-0 z-[3] w-[6px] cursor-ew-resize border-0 bg-transparent p-0 hover:bg-black/20"
+                  onMouseDown={(event) => startCueDrag(event, cue.id, 'end')}
+                  type="button"
+                />
+              </div>
+            );
+          })}
           <div className="pointer-events-none absolute top-0 bottom-0 z-[4] w-[1.5px]" style={{ background: accent, left: `${progress * 100}%` }} />
         </div>
 

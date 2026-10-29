@@ -21,7 +21,7 @@ export async function requestJson<T>(url: string, options: RequestInit & { body?
 
   if (!response.ok) {
     const errorBody = body as ApiErrorBody | null;
-    throw new ApiError(errorBody?.message || errorBody?.error || `API request failed: ${response.status}`, response.status);
+    throw new ApiError(errorBody?.message || errorBody?.error || errorBody?.detail || `API request failed: ${response.status}`, response.status);
   }
 
   return unwrapApiResponse<T>(body);

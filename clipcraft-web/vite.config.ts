@@ -21,6 +21,9 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/analyze': backendUrl,
         '/export': backendUrl,
+        '/transcribe': backendUrl,
+        '/translate': backendUrl,
+        '/suggest-subtitles': backendUrl,
       },
     },
   };

@@ -1,6 +1,6 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { IconName } from '@/components/icons';
-import type { ChatMessage as AppChatMessage, EditorHighlightSegment, HighlightAnalysisData, SegmentEditSetting } from '@/types/app';
+import type { ChatMessage as AppChatMessage, EditorHighlightSegment, HighlightAnalysisData, SegmentEditSetting, SubtitleCue } from '@/types/app';
 
 export interface EditorScreenProps {
   onBack: () => void;
@@ -28,12 +28,18 @@ export interface PlayerControlsProps {
 
 export interface WaveformTimelineProps {
   accent: string;
+  activeCueId?: number;
   duration: number;
+  onCueMove: (cueId: number, start: number) => void;
+  onCueSelect: (cueId: number) => void;
+  selectedCueId: number | null;
+  onCueTimeChange: (cueId: number, edge: 'start' | 'end', time: number) => void;
   onSegmentChange: (segmentId: number, edge: 'start' | 'end', time: number) => void;
   progress: number;
   segments: EditorHighlightSegment[];
   setPlaying: Dispatch<SetStateAction<boolean>>;
   setProgress: Dispatch<SetStateAction<number>>;
+  subtitleCues: SubtitleCue[];
   waveHeights: number[];
 }
 
