@@ -12,8 +12,10 @@ export interface ExportVideoRequest {
     speed: number;
     muted: boolean;
   }>;
+  /** 출력 화면 비율. 없으면 원본 비율 그대로 */
+  output_aspect?: '16:9' | '9:16' | '1:1';
   subtitle_cues?: TimelineCue[];
-  subtitle_style?: Pick<SubtitleStyle, 'font' | 'size' | 'position' | 'color' | 'box'>;
+  subtitle_style?: Pick<SubtitleStyle, 'font' | 'size' | 'position' | 'color' | 'box'> & { extra_lang: string };
 }
 
 export interface ExportSubtitles {
@@ -21,7 +23,7 @@ export interface ExportSubtitles {
   style: SubtitleStyle;
 }
 
-export async function requestExportVideo(videoPath: string, segments: EditorHighlightSegment[], segmentEditSettings: SegmentEditSetting[], subtitles?: ExportSubtitles): Promise<Blob> {
+export async function requestExportVideo(videoPath: string, segments: EditorHighlightSegment[], segmentEditSettings: SegmentEditSetting[], subtitles?: ExportSubtitles, outputAspect?: ExportVideoRequest['output_aspect']): Promise<Blob> {
   const endpoint = getApiUrl(import.meta.env.VITE_EXPORT_API_URL, DEFAULT_EXPORT_API_URL);
   const settingsBySegmentId = new Map(segmentEditSettings.map((setting) => [setting.segmentId, setting]));
   const response = await fetch(endpoint, {
@@ -41,10 +43,11 @@ export async function requestExportVideo(videoPath: string, segments: EditorHigh
           muted: editSetting?.muted ?? false,
         };
       }),
+      ...(outputAspect ? { output_aspect: outputAspect } : {}),
       ...(subtitles && subtitles.cues.length > 0
         ? {
             subtitle_cues: subtitles.cues,
-            subtitle_style: { font: subtitles.style.font, size: subtitles.style.size, position: subtitles.style.position, color: subtitles.style.color, box: subtitles.style.box },
+            subtitle_style: { font: subtitles.style.font, size: subtitles.style.size, position: subtitles.style.position, color: subtitles.style.color, box: subtitles.style.box, extra_lang: subtitles.style.extraLang },
           }
         : {}),
     } satisfies ExportVideoRequest),

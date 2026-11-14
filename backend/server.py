@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from edit_agent import make_graph, run_edit
+
 
 app = FastAPI(title="ClipCraft Backend")
 app.add_middleware(
@@ -57,6 +59,15 @@ async def start_analyze_job(
         )
     }
     data = {"project_name": project_name, "scenarios": scenarios}
+
+    # GPU 서버의 ReVision은 영어 질문 기준이다. OpenAI 키는 이 백엔드에만 있으므로 여기서 번역해서 함께 보낸다.
+    try:
+        scenario_list = json.loads(scenarios)
+    except ValueError:
+        scenario_list = []
+    queries_en = await scenarios_to_english(scenario_list) if isinstance(scenario_list, list) else None
+    if queries_en:
+        data["queries_en"] = json.dumps(queries_en, ensure_ascii=False)
 
     async with httpx.AsyncClient(timeout=None) as client:
         response = await client.post(f"{GPU_SERVER_URL}/analyze/jobs", files=files, data=data)
@@ -111,9 +122,23 @@ async def get_transcribe_job(job_id: str):
 
 class TranslateRequest(BaseModel):
     texts: list[str]
+    target: str = "ko"
 
 
-async def translate_batch(client: httpx.AsyncClient, texts: list[str]) -> list[str]:
+TRANSLATE_LANGUAGES = {
+    "ko": "Korean",
+    "en": "English",
+    "ja": "Japanese",
+    "zh": "Simplified Chinese",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "vi": "Vietnamese",
+    "th": "Thai",
+}
+
+
+async def translate_batch(client: httpx.AsyncClient, texts: list[str], target: str) -> list[str]:
     numbered = "\n".join(f"{index + 1}. {text}" for index, text in enumerate(texts))
     response = await client.post(
         "https://api.openai.com/v1/chat/completions",
@@ -126,7 +151,7 @@ async def translate_batch(client: httpx.AsyncClient, texts: list[str]) -> list[s
                 {
                     "role": "system",
                     "content": (
-                        "You translate video subtitles into natural, concise Korean. "
+                        f"You translate video subtitles into natural, concise {TRANSLATE_LANGUAGES[target]}. "
                         "Keep the meaning and tone, keep proper nouns readable, and do not merge or split lines. "
                         'Reply with JSON only: {"translations": ["...", ...]} with exactly one entry per input line, in order.'
                     ),
@@ -148,15 +173,59 @@ async def translate_batch(client: httpx.AsyncClient, texts: list[str]) -> list[s
     return [str(item) for item in translations]
 
 
+async def scenarios_to_english(scenarios: list[str]) -> list[str] | None:
+    """시나리오 문장을 영상 탐색용 짧은 영어 문장으로 바꾼다. 실패하면 None(GPU 서버가 원문으로 대신 탐색)."""
+    if not OPENAI_API_KEY or not scenarios or not all(isinstance(item, str) for item in scenarios):
+        return None
+
+    numbered = "\n".join(f"{index + 1}. {text}" for index, text in enumerate(scenarios))
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                json={
+                    "model": TRANSLATE_MODEL,
+                    "temperature": 0,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You turn scene descriptions into short English queries for a video moment-retrieval model. "
+                                "Write one plain sentence per input that describes the visible action, in the style of "
+                                '"a person pours sauce into a bowl". Present tense, concrete, no quotes, no extra details, '
+                                "keep the original meaning. If an input is already English, keep it simple. "
+                                'Reply with JSON only: {"queries": ["...", ...]} with exactly one entry per input line, in order.'
+                            ),
+                        },
+                        {"role": "user", "content": numbered},
+                    ],
+                },
+            )
+        response.raise_for_status()
+        queries = json.loads(response.json()["choices"][0]["message"]["content"])["queries"]
+    except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as error:
+        print(f"[analyze] 시나리오 영어 변환 실패, 원문으로 탐색합니다: {error}")
+        return None
+
+    if not isinstance(queries, list) or len(queries) != len(scenarios) or not all(isinstance(q, str) and q.strip() for q in queries):
+        print("[analyze] 시나리오 영어 변환 결과의 줄 수가 맞지 않아 원문으로 탐색합니다.")
+        return None
+    return [q.strip() for q in queries]
+
+
 @app.post("/translate")
 async def translate_to_korean(request: TranslateRequest):
     if not OPENAI_API_KEY:
         raise HTTPException(status_code=503, detail="OPENAI_API_KEY가 설정되지 않아 번역할 수 없습니다.")
+    if request.target not in TRANSLATE_LANGUAGES:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 번역 언어입니다: {request.target}")
 
     results: list[str] = []
     async with httpx.AsyncClient(timeout=60.0) as client:
         for start in range(0, len(request.texts), TRANSLATE_BATCH_SIZE):
-            results.extend(await translate_batch(client, request.texts[start:start + TRANSLATE_BATCH_SIZE]))
+            results.extend(await translate_batch(client, request.texts[start:start + TRANSLATE_BATCH_SIZE], request.target))
     return {"translations": results}
 
 
@@ -168,6 +237,7 @@ SUGGEST_TONES = {
     "descriptive": "차분하고 설명적인 톤. 장면에서 무슨 일이 일어나는지 간결하게 설명한다.",
     "emotional": "감성적인 톤. 장면의 분위기와 감정을 짧고 시적으로 표현한다.",
     "funny": "유머러스한 톤. 가볍고 재치 있게, 과하지 않게 표현한다.",
+    "impact": "짧고 강렬한 임팩트 톤. 보는 사람의 호기심을 끄는 한 줄 문구로 힘 있게 말한다. 과장하거나 낚시성 표현은 쓰지 않는다.",
 }
 
 
@@ -294,3 +364,77 @@ async def export_video(request: Request):
         media_type=response.headers.get("content-type", "video/mp4"),
         headers=headers,
     )
+
+
+class ChatClip(BaseModel):
+    id: int
+    scenario: str = ""
+    title: str | None = None
+    start: float
+    end: float
+    speed: float = 1
+    muted: bool = False
+    # 이 클립에 붙은 자막 문구(있으면). "자막 위로" 같은 말의 맥락으로 쓴다.
+    subtitle: str | None = None
+
+
+class ChatEditRequest(BaseModel):
+    thread_id: str
+    message: str
+    clips: list[ChatClip]
+    video_duration: float = 0
+    # 확인 질문에 대한 버튼 응답. 글자로 "응"/"아니"를 보내도 같은 결과다.
+    confirm: bool | None = None
+
+
+_edit_graph = None
+
+
+@app.post("/chat/edit")
+async def chat_edit(request: ChatEditRequest):
+    global _edit_graph
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY가 설정되지 않아 채팅 편집을 쓸 수 없습니다.")
+    if not request.message.strip() and request.confirm is None:
+        raise HTTPException(status_code=400, detail="message가 비어 있습니다.")
+    if _edit_graph is None:
+        _edit_graph = make_graph({"api_key": OPENAI_API_KEY, "model": os.environ.get("CHAT_EDIT_MODEL", TRANSLATE_MODEL)})
+    return await run_edit(
+        _edit_graph,
+        request.thread_id,
+        request.message,
+        [clip.model_dump() for clip in request.clips],
+        request.video_duration,
+        request.confirm,
+    )
+
+
+STT_MODEL = os.environ.get("STT_MODEL", "whisper-1")
+STT_MAX_BYTES = 10 * 1024 * 1024
+
+
+@app.post("/chat/transcribe")
+async def chat_transcribe(audio: UploadFile = File(...), language: str = Form("ko")):
+    """채팅 편집용 음성 -> 글자. 브라우저 녹음(Chrome webm, Safari mp4)을 그대로 Whisper에 보낸다."""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY가 설정되지 않아 음성 인식을 쓸 수 없습니다.")
+    data = await audio.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="녹음된 소리가 없습니다.")
+    if len(data) > STT_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="녹음이 너무 깁니다. 짧게 나눠서 말해 주세요.")
+
+    content_type = (audio.content_type or "").split(";")[0] or "audio/webm"
+    extension = "m4a" if "mp4" in content_type or "m4a" in content_type or "aac" in content_type else "ogg" if "ogg" in content_type else "wav" if "wav" in content_type else "webm"
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            # 편집 용어를 미리 알려 주면 "클립 2"를 "클립 이에"로 듣는 식의 오인식이 줄어든다
+            data={"model": STT_MODEL, "language": language, "temperature": "0", "prompt": "영상 편집 명령. 클립 1, 클립 2, 클립 3, 자막, 배속, 음소거, 삭제, 장면, 맨 뒤로"},
+            files={"file": (f"voice.{extension}", data, content_type)},
+        )
+    if not response.is_success:
+        print(f"[chat-transcribe] {response.status_code} {content_type} {len(data)}B: {response.text[:300]}")
+        raise HTTPException(status_code=502, detail=f"음성 인식 요청에 실패했습니다 ({response.status_code}).")
+    return {"text": str(response.json().get("text", "")).strip()}

@@ -30,6 +30,8 @@ export interface WaveformTimelineProps {
   accent: string;
   activeCueId?: number;
   duration: number;
+  onCueAdd: (time: number) => void;
+  onCueDrop: (cueId: number, time: number) => void;
   onCueMove: (cueId: number, start: number) => void;
   onCueSelect: (cueId: number) => void;
   selectedCueId: number | null;
@@ -63,10 +65,14 @@ export interface ChatMessageProps extends AccentProps {
 export interface NaturalLanguageCommandResult {
   message: string;
   status: 'success' | 'error';
+  /** 삭제처럼 승인이 필요한 요청이면 true. 채팅창이 승인/거절 버튼을 보여준다. */
+  needsConfirm?: boolean;
 }
 
 export interface AiAssistantProps extends AccentProps {
-  onApplyCommand: (command: string) => NaturalLanguageCommandResult;
+  onApplyCommand: (command: string, confirm?: boolean) => NaturalLanguageCommandResult | Promise<NaturalLanguageCommandResult>;
+  onReset?: () => void;
+  onClose?: () => void;
 }
 
 export interface RoundIconButtonProps {

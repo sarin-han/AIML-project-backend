@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => {
         '/export': backendUrl,
         '/transcribe': backendUrl,
         '/translate': backendUrl,
+        '/chat': backendUrl,
         '/suggest-subtitles': backendUrl,
       },
     },

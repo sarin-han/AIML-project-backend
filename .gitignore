@@ -10,3 +10,9 @@ __pycache__/
 clip_search/clips/
 
 ClipCraft-AI/
+
+# 외부 GPU 서버 접속 정보 (비밀번호 포함, 커밋 금지)
+.server-access.local
+
+# Playwright 결과물
+clipcraft-web/test-results/

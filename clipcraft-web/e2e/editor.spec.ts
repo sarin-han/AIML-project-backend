@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { runAnalysisFlow } from './support/flows';
 
 async function sendCommand(page: import('@playwright/test').Page, command: string) {
+  if (!(await page.getByTestId('chat-input').isVisible())) await page.getByTestId('assistant-toggle').click();
   await page.getByTestId('chat-input').fill(command);
   await page.getByTestId('chat-send-button').click();
 }

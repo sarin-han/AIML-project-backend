@@ -65,6 +65,8 @@ class AnalysisRequest(BaseModel):
     project_name: str
     video_path: str
     scenarios: List[str]
+    # ReVision은 영어 질문 기준이다. scenarios와 같은 순서·길이의 영어 문장(백엔드가 번역해서 보냄).
+    queries_en: Optional[List[str]] = None
 
 class ExportSegment(BaseModel):
     start: float
@@ -75,6 +77,8 @@ class ExportSegment(BaseModel):
 class ExportRequest(BaseModel):
     video_path: str
     segments: List[ExportSegment]
+    # 출력 화면 비율("16:9", "9:16", "1:1"). 없으면 원본 비율 그대로. 영상은 비율을 유지한 채 검은 여백으로 채운다.
+    output_aspect: Optional[str] = None
     # 편집된 타임라인(구간 순서, 배속 반영) 기준 자막. 있으면 내보낸 영상에 자막을 입힌다.
     subtitle_cues: Optional[List["ExportSubtitleCue"]] = None
     subtitle_style: Optional["SubtitleStyle"] = None
@@ -84,8 +88,14 @@ class ExportSubtitleCue(BaseModel):
     end: float
     text: str
     top: Optional[str] = None   # 두 언어 표시일 때 위에 놓는 원문
+    bottom: Optional[str] = None  # 아래 줄에 덧붙이는 다른 언어 자막(예: 영어)
     x: Optional[float] = None   # 자막 가운데의 가로 위치(영상 가로 대비 %). 없으면 가운데
     y: Optional[float] = None   # 영상 아래쪽에서 자막 아래끝까지의 거리(세로 대비 %). 없으면 스타일 기본 위치
+    # 아래 값이 있으면 이 자막만 기본 스타일 대신 사용한다.
+    font: Optional[str] = None
+    size: Optional[float] = None
+    color: Optional[str] = None
+    box: Optional[bool] = None
 
 class SubtitleStyle(BaseModel):
     font: str = "nanum-gothic"
@@ -93,6 +103,7 @@ class SubtitleStyle(BaseModel):
     position: float = 8.0    # 영상 아래쪽에서 자막까지의 거리(세로 길이 대비 %)
     color: str = "#FFFFFF"
     box: bool = False        # True면 글자 뒤에 반투명 검정 박스
+    extra_lang: str = "en"   # 아래 줄(추가 언어) 자막의 언어 코드. 글자체 선택에 쓴다.
 
 ExportRequest.model_rebuild()
 
@@ -124,6 +135,32 @@ def get_video_size(ffprobe: str, video_path: str) -> tuple[int, int]:
     except ValueError:
         return 1080, 1920
 
+EXPORT_ASPECTS = {"16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1.0}
+
+def compute_export_canvas(src_width: int, src_height: int, aspect: str) -> tuple[int, int, tuple[int, int, int, int]]:
+    """원본 영상(src)을 비율(aspect)의 캔버스에 비율을 유지한 채 넣는다.
+    캔버스의 짧은 변은 1080(원본의 짧은 변이 더 작으면 그 크기)으로 맞춘다. 예: 9:16 -> 1080x1920, 16:9 -> 1920x1080.
+    반환: (캔버스 가로, 세로, 캔버스 안 실제 영상 영역 (x0, y0, 가로, 세로))."""
+    ratio = EXPORT_ASPECTS[aspect]
+    short_side = min(1080, src_width, src_height)
+    if ratio >= 1:
+        canvas_h, canvas_w = short_side, round(short_side * ratio)
+    else:
+        canvas_w, canvas_h = short_side, round(short_side / ratio)
+    canvas_w, canvas_h = canvas_w - canvas_w % 2, canvas_h - canvas_h % 2
+    scale = min(canvas_w / src_width, canvas_h / src_height)
+    video_w, video_h = round(src_width * scale), round(src_height * scale)
+    return canvas_w, canvas_h, ((canvas_w - video_w) // 2, (canvas_h - video_h) // 2, video_w, video_h)
+
+# 추가 언어 자막(아래 줄)에 쓰는 폰트. 한글 폰트에는 일본어·중국어·태국어 글자가 없어서 언어별로 따로 둔다.
+EXTRA_LANGUAGE_FONTS = {
+    "ko": "NanumGothic",
+    "ja": "Noto Sans JP",
+    "zh": "Noto Sans SC",
+    "th": "Noto Sans Thai",
+}
+EXTRA_LANGUAGE_DEFAULT_FONT = "Noto Sans"  # 영어·스페인어·프랑스어·독일어·베트남어 등 라틴 문자
+
 def validate_subtitle_style(style: "SubtitleStyle") -> None:
     if style.font not in SUBTITLE_FONTS:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 자막 폰트입니다: {style.font}")
@@ -140,15 +177,60 @@ def ass_time(seconds: float) -> str:
 def ass_text(value: str) -> str:
     return value.replace("{", "").replace("}", "").replace("\\", "").replace("\r", "").strip().replace("\n", "\\N")
 
-def build_ass(cues: List["ExportSubtitleCue"], style: "SubtitleStyle", width: int, height: int) -> str:
-    """자막을 ASS 파일 내용으로 만든다. 좌표계를 실제 영상 픽셀로 맞추고, 자막별 위치는 \\pos로 지정한다."""
+def build_ass(cues: List["ExportSubtitleCue"], style: "SubtitleStyle", width: int, height: int, rect: Optional[tuple[int, int, int, int]] = None) -> str:
+    """자막을 ASS 파일 내용으로 만든다. 좌표계를 실제 영상 픽셀로 맞추고, 자막별 위치는 \\pos로 지정한다.
+    자막마다 폰트·크기·색·박스가 다를 수 있어서, 조합별로 Style을 하나씩 만든다.
+    rect=(x0, y0, 가로, 세로)는 캔버스(width x height) 안에서 실제 영상이 차지하는 영역이다. 여백이 있어도 자막의 크기와 위치는
+    미리보기처럼 영상 영역 기준(%)으로 계산한다. 없으면 캔버스 전체가 영상이다."""
     validate_subtitle_style(style)
-    font_name, bold = SUBTITLE_FONTS[style.font]
-    font_size = round(min(max(style.size, 1.0), 12.0) / 100 * height)
-    margin_h = round(width * 0.05)
-    margin_v = round(min(max(style.position, 0.0), 95.0) / 100 * height)
-    border_style, outline_color, outline = (3, ass_color("#000000", "80"), max(2, round(height * 0.006))) if style.box else (1, ass_color("#000000"), max(1, round(height * 0.0035)))
-    primary = ass_color(style.color)
+    x0, y0, video_w, video_h = rect if rect else (0, 0, width, height)
+    margin_h = x0 + round(video_w * 0.05)
+    margin_v = (height - (y0 + video_h)) + round(min(max(style.position, 0.0), 95.0) / 100 * video_h)
+    style_lines: List[str] = []
+    style_names: dict = {}
+
+    def style_for(cue: "ExportSubtitleCue") -> tuple[str, str, int]:
+        resolved = SubtitleStyle(
+            font=cue.font or style.font,
+            size=cue.size if cue.size is not None else style.size,
+            position=style.position,
+            color=cue.color or style.color,
+            box=style.box if cue.box is None else cue.box,
+        )
+        key = (resolved.font, round(resolved.size, 2), resolved.color.upper(), resolved.box)
+        if key not in style_names:
+            validate_subtitle_style(resolved)
+            font_name, bold = SUBTITLE_FONTS[resolved.font]
+            font_size = round(min(max(resolved.size, 1.0), 12.0) / 100 * video_h)
+            border_style, outline_color, outline = (3, ass_color("#000000", "80"), max(2, round(video_h * 0.006))) if resolved.box else (1, ass_color("#000000"), max(1, round(video_h * 0.0035)))
+            primary = ass_color(resolved.color)
+            name = f"S{len(style_names)}"
+            style_names[key] = name
+            style_lines.append(
+                f"Style: {name},{font_name},{font_size},{primary},{primary},{outline_color},&H00000000,{-1 if bold else 0},0,0,0,100,100,0,0,{border_style},{outline},0,2,{margin_h},{margin_h},{margin_v},1"
+            )
+        return style_names[key], ass_color(resolved.color), round(min(max(resolved.size, 1.0), 12.0) / 100 * video_h)
+
+    events: List[str] = []
+    for cue in cues:
+        text = ass_text(cue.text)
+        bottom = ass_text(cue.bottom) if cue.bottom else ""
+        if not text and not cue.top and not bottom:
+            continue
+
+        style_name, primary, font_px = style_for(cue)
+        body = text
+        if cue.top and ass_text(cue.top):
+            body = f"{{\\c{ass_color('#CCCCCC')}&}}{ass_text(cue.top)}\\N{{\\c{primary}&}}{text}"
+        if bottom:
+            # 아래 줄(영어 등)은 본 자막보다 조금 작게 그린다.
+            extra_font = EXTRA_LANGUAGE_FONTS.get(style.extra_lang, EXTRA_LANGUAGE_DEFAULT_FONT)
+            body = f"{body}\\N{{\\fn{extra_font}\\b1\\fs{round(font_px * 0.85)}}}{bottom}"
+        if cue.x is not None or cue.y is not None:
+            x = x0 + min(max(cue.x if cue.x is not None else 50.0, 0.0), 100.0) / 100 * video_w
+            y = y0 + video_h - min(max(cue.y if cue.y is not None else style.position, 0.0), 100.0) / 100 * video_h
+            body = f"{{\\an2\\pos({x:.0f},{y:.0f})}}{body}"
+        events.append(f"Dialogue: 0,{ass_time(cue.start)},{ass_time(cue.end)},{style_name},,0,0,0,,{body}")
 
     lines = [
         "[Script Info]",
@@ -159,25 +241,12 @@ def build_ass(cues: List["ExportSubtitleCue"], style: "SubtitleStyle", width: in
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        f"Style: Default,{font_name},{font_size},{primary},{primary},{outline_color},&H00000000,{-1 if bold else 0},0,0,0,100,100,0,0,{border_style},{outline},0,2,{margin_h},{margin_h},{margin_v},1",
+        *style_lines,
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+        *events,
     ]
-    for cue in cues:
-        text = ass_text(cue.text)
-        if not text and not cue.top:
-            continue
-
-        body = text
-        if cue.top and ass_text(cue.top):
-            body = f"{{\\c{ass_color('#CCCCCC')}&}}{ass_text(cue.top)}\\N{{\\c{primary}&}}{text}"
-        if cue.x is not None or cue.y is not None:
-            x = min(max(cue.x if cue.x is not None else 50.0, 0.0), 100.0) / 100 * width
-            y = height - min(max(cue.y if cue.y is not None else style.position, 0.0), 100.0) / 100 * height
-            body = f"{{\\an2\\pos({x:.0f},{y:.0f})}}{body}"
-        lines.append(f"Dialogue: 0,{ass_time(cue.start)},{ass_time(cue.end)},Default,,0,0,0,,{body}")
-
     return "\n".join(lines) + "\n"
 
 class AnalysisJobStartResponse(BaseModel):
@@ -262,6 +331,27 @@ def add_job_log(job_id: str, message: str):
         job["logs"] = [*job.get("logs", []), message]
         job["updated_at"] = time.time()
 
+def ground_with_revision(request: AnalysisRequest, job_id: str | None) -> list:
+    """ReVision 서비스로 모든 시나리오의 구간을 한 번에 찾는다. 시나리오와 같은 순서로 {"start","end"} 또는 None."""
+    import revision_client
+
+    queries = request.queries_en
+    if not queries or len(queries) != len(request.scenarios):
+        queries = request.scenarios
+        message = "⚠️ 영어 질문이 없어 시나리오 원문으로 탐색합니다. 한국어는 정확도가 크게 떨어질 수 있습니다."
+        print(message)
+        if job_id:
+            add_job_log(job_id, message)
+    if job_id:
+        update_job(
+            job_id,
+            progress=15,
+            step_id=1,
+            step_label=ANALYSIS_STEPS[1],
+            message="ReVision으로 시나리오 구간을 탐색 중입니다.",
+        )
+    return revision_client.ground(request.video_path, queries)
+
 def run_analysis(request: AnalysisRequest, job_id: str | None = None):
     print(f"video_path: {request.video_path}")
     final_results = []
@@ -273,6 +363,20 @@ def run_analysis(request: AnalysisRequest, job_id: str | None = None):
     safe_project = make_safe_name(request.project_name)
 
     total_scenarios = max(1, len(request.scenarios))
+
+    # ANALYSIS_ENGINE=revision(기본): ReVisionLLM 서비스. clip: 기존 CLIP 검색 + Video-LLaVA 검증.
+    use_revision = os.environ.get("ANALYSIS_ENGINE", "revision") == "revision"
+    revision_segments: list = []
+    if use_revision:
+        import revision_client
+        if revision_client.is_available():
+            revision_segments = ground_with_revision(request, job_id)
+        else:
+            use_revision = False
+            message = "⚠️ ReVision 서비스에 연결할 수 없어 기존 CLIP 검색으로 분석합니다."
+            print(message)
+            if job_id:
+                add_job_log(job_id, message)
 
     for i, query in enumerate(request.scenarios, start=1):
         safe_query_text = make_safe_name(query)[:30]
@@ -288,14 +392,20 @@ def run_analysis(request: AnalysisRequest, job_id: str | None = None):
                 message=f"{i}/{total_scenarios} 시나리오 프레임을 분석 중입니다.",
             )
 
-        pipeline_result = run_local_clip_search(
-            video_path=request.video_path,
-            query=query,
-            project_name=safe_project,
-            scenario_folder_name=scenario_folder_name,
-        )
-        print(f"pipeline_result keys: {pipeline_result.keys() if isinstance(pipeline_result, dict) else 'list'}")
-        print(f"pipeline_result: {pipeline_result}")
+        if use_revision:
+            found = revision_segments[i - 1]
+            segments = [found] if found else []
+            print(f"[revision] scenario {i} '{query}' -> {found}")
+        else:
+            pipeline_result = run_local_clip_search(
+                video_path=request.video_path,
+                query=query,
+                project_name=safe_project,
+                scenario_folder_name=scenario_folder_name,
+            )
+            print(f"pipeline_result keys: {pipeline_result.keys() if isinstance(pipeline_result, dict) else 'list'}")
+            print(f"pipeline_result: {pipeline_result}")
+            segments = pipeline_result.get("segments", []) if isinstance(pipeline_result, dict) else pipeline_result
 
         if job_id:
             update_job(
@@ -306,23 +416,21 @@ def run_analysis(request: AnalysisRequest, job_id: str | None = None):
                 message=f"{i}/{total_scenarios} 시나리오의 후보 구간을 찾았습니다.",
             )
 
-        segments = pipeline_result.get("segments", []) if isinstance(pipeline_result, dict) else pipeline_result
-
-
         if segments: # 수정
             best = segments[0] #
-            try:
-                vllava_result = get_verifier().verify_timestamp(
-                    video_path=request.video_path,
-                    scenario_text=query,
-                    candidates=segments,
-                )
-                if isinstance(vllava_result, dict):
-                    best = segments[vllava_result.get("best_idx", 0)]
-            except Exception as error:
-                print(f"⚠️ [VLLaVA] verifier unavailable, using first CLIP segment: {error}")
-                if job_id:
-                    add_job_log(job_id, "⚠️ VLLaVA 검증을 건너뛰고 첫 번째 후보 구간을 사용했습니다.")
+            if not use_revision:
+                try:
+                    vllava_result = get_verifier().verify_timestamp(
+                        video_path=request.video_path,
+                        scenario_text=query,
+                        candidates=segments,
+                    )
+                    if isinstance(vllava_result, dict):
+                        best = segments[vllava_result.get("best_idx", 0)]
+                except Exception as error:
+                    print(f"⚠️ [VLLaVA] verifier unavailable, using first CLIP segment: {error}")
+                    if job_id:
+                        add_job_log(job_id, "⚠️ VLLaVA 검증을 건너뛰고 첫 번째 후보 구간을 사용했습니다.")
 
             if job_id:
                 update_job(
@@ -393,8 +501,10 @@ async def start_analyze_job(
     video: UploadFile = File(...),
     project_name: str = Form(...),
     scenarios: str = Form(...),
+    queries_en: Optional[str] = Form(None),
 ):
     scenarios_list: List[str] = json.loads(scenarios)
+    queries_en_list: Optional[List[str]] = json.loads(queries_en) if queries_en else None
 
     suffix = os.path.splitext(video.filename or ".mp4")[1] or ".mp4"
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
@@ -409,6 +519,7 @@ async def start_analyze_job(
         project_name=project_name,
         video_path=tmp.name,
         scenarios=scenarios_list,
+        queries_en=queries_en_list,
     )
 
     job_id = uuid.uuid4().hex
@@ -540,6 +651,7 @@ async def export_video(request: ExportRequest):
     ffmpeg, ffprobe = get_ffmpeg_paths()
     temp_files = []
     export_id = uuid.uuid4().hex
+    tmp_dir = tempfile.gettempdir()
 
     def get_safe_speed(value: float) -> float:
         if not isinstance(value, (int, float)) or value <= 0:
@@ -594,14 +706,24 @@ async def export_video(request: ExportRequest):
 
         source_has_audio = has_audio_stream(request.video_path)
 
+        # 출력 비율이 지정되면 그 비율의 캔버스에 영상을 비율 유지로 넣는다(남는 곳은 검은 여백).
+        canvas = None
+        video_rect = None
+        if request.output_aspect:
+            if request.output_aspect not in EXPORT_ASPECTS:
+                raise HTTPException(status_code=400, detail=f"지원하지 않는 출력 비율입니다: {request.output_aspect}")
+            src_width, src_height = get_video_size(ffprobe, request.video_path)
+            canvas_w, canvas_h, video_rect = compute_export_canvas(src_width, src_height, request.output_aspect)
+            canvas = f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=decrease,pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,"
+
         for i, seg in enumerate(request.segments):
-            temp_path = f"/tmp/clipcraft_{export_id}_clip_{i}.mp4"
+            temp_path = os.path.join(tmp_dir, f"clipcraft_{export_id}_clip_{i}.mp4")
             start = max(0.0, seg.start)
             end = max(start + 0.05, seg.end)
             speed = get_safe_speed(seg.speed)
             duration = end - start
             output_duration = duration / speed
-            video_filter = f"[0:v]setpts=PTS/{speed:.6f}[v]"
+            video_filter = f"[0:v]{canvas or ''}setpts=PTS/{speed:.6f}[v]"
 
             if seg.muted or not source_has_audio:
                 filter_complex = f"{video_filter};[1:a]atrim=0:{output_duration:.6f},asetpts=PTS-STARTPTS[a]"
@@ -670,13 +792,13 @@ async def export_video(request: ExportRequest):
             subprocess.run(command, check=True, capture_output=True)
             temp_files.append(temp_path)
         
-        list_file = f"/tmp/clipcraft_{export_id}_clips_list.txt"
+        list_file = os.path.join(tmp_dir, f"clipcraft_{export_id}_clips_list.txt")
         with open(list_file, "w") as f:
             for p in temp_files:
                 f.write(f"file '{p}'\n")
         
-        output_path = f"/tmp/clipcraft_{export_id}_output_final.mp4"
-        concat_path = f"/tmp/clipcraft_{export_id}_concat.mp4" if subtitle_cues else output_path
+        output_path = os.path.join(tmp_dir, f"clipcraft_{export_id}_output_final.mp4")
+        concat_path = os.path.join(tmp_dir, f"clipcraft_{export_id}_concat.mp4") if subtitle_cues else output_path
         subprocess.run([
             ffmpeg, "-y", "-f", "concat", "-safe", "0",
             "-i", list_file, "-c", "copy", concat_path
@@ -686,10 +808,10 @@ async def export_video(request: ExportRequest):
             if not os.path.isdir(SUBTITLE_FONTS_DIR):
                 raise HTTPException(status_code=500, detail="자막 폰트 폴더를 찾을 수 없습니다.")
 
-            ass_path = f"/tmp/clipcraft_{export_id}_subtitles.ass"
+            ass_path = os.path.join(tmp_dir, f"clipcraft_{export_id}_subtitles.ass")
             width, height = get_video_size(ffprobe, concat_path)
             with open(ass_path, "w", encoding="utf-8") as f:
-                f.write(build_ass(subtitle_cues, request.subtitle_style or SubtitleStyle(), width, height))
+                f.write(build_ass(subtitle_cues, request.subtitle_style or SubtitleStyle(), width, height, video_rect))
             temp_files.extend([concat_path, ass_path])
 
             subtitle_filter = f"subtitles=filename={ass_path}:fontsdir={SUBTITLE_FONTS_DIR}"

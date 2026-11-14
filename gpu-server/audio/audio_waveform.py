@@ -1,12 +1,14 @@
 # audio_waveform.py
 
 import json
+import shutil
 import subprocess
 import numpy as np
 import imageio_ffmpeg
 
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
-FFPROBE_PATH = FFMPEG_PATH.replace("ffmpeg", "ffprobe")
+# imageio 쪽에는 ffprobe 바이너리가 없는 환경이 있어서 시스템 ffprobe를 먼저 쓴다.
+FFPROBE_PATH = shutil.which("ffprobe") or FFMPEG_PATH.replace("ffmpeg", "ffprobe")
 
 def _probe_duration(file_path: str) -> float:
     command = [
@@ -23,7 +25,7 @@ def _probe_duration(file_path: str) -> float:
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True)
         return float(result.stdout.strip())
-    except (subprocess.CalledProcessError, ValueError):
+    except (subprocess.CalledProcessError, ValueError, FileNotFoundError):
         return 0.0
 
 

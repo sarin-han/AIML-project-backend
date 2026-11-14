@@ -11,9 +11,13 @@
 | 말소리 인식 | GPU 서버에서 `faster-whisper large-v3`(float16, GPU)로 음성을 자막 구간으로 변환. 언어는 자동 감지 / 한국어 / 영어 선택 |
 | 한국어 번역 | 영어 등 한국어가 아닌 자막을 OpenAI(`gpt-4o-mini`)로 번역. 원문은 `original`에 보관 |
 | 두 언어 표시 | 원문(위, 회색) + 번역(아래)을 두 줄로 표시 |
+| 자막 추가·맞춤 | "+ 자막 추가" 버튼, 자막 줄 빈 곳 더블클릭으로 추가. 길이를 끌 때 클립 경계·다른 자막·재생 위치에 자석처럼 붙음(Alt로 해제), "클립 길이에 맞추기" |
+| 장면과 자막 연결 | 내보내기에는 선택한 장면(클립) 안에 걸친 자막만 사용. 목록은 선택한 클립의 자막만 보여주고 "전체 자막 보기"로 전체 확인, 장면 밖 자막은 흐리게 표시·일괄 삭제 가능 |
+| 다른 언어 자막 추가 | 자막 아래 줄에 다른 언어 자막을 추가(변환). 영어·일본어·중국어(간체)·스페인어·프랑스어·독일어·베트남어·태국어·한국어. OpenAI로 번역하고 줄마다 수정 가능, 영상에도 입혀 내보냄(언어별 폰트 사용) |
+| 자막 종류 전환 | 음성 자막과 시나리오 자막을 따로 보관하고, 둘 다 있으면 버튼으로 전환(편집·내보내기는 선택한 쪽) |
 | 시나리오대로 만들기 | 말소리가 없는 영상용. 분석에서 얻은 시나리오 문장으로 짧은 자막 문구 생성(톤: 설명형 / 감성형 / 유머형) |
-| 자막 수정 | 문장 수정·삭제, 파형 아래 자막 줄에서 길이 조절·이동, 영상 화면에서 끌어서 위치 이동(자막별) |
-| 자막 스타일 | 폰트 11종, 크기(숫자), 위치(상단/중앙/하단), 색(기본색 + 팔레트), 배경 박스 |
+| 자막 수정 | 문장 수정·삭제, 목록에서 파형(시간)·영상 화면(위치)으로 끌어다 놓기, 파형 아래 자막 줄에서 길이 조절·이동, 선택한 자막의 시간 클릭 수정, 영상 화면에서 끌어서 위치 이동·모서리 핸들로 크기 조절(격자·가운데에 맞추기, Alt로 해제) |
+| 자막 스타일 | 폰트 11종, 크기(숫자), 위치(상단/중앙/하단), 색(흰색~검정 회색 단계 + 팔레트 직접 고르기), 배경 박스. 전체 기본값과 자막별 개별 스타일을 따로 줄 수 있고, 선택한 자막의 스타일을 모든 자막에 적용 가능 |
 | 내보내기 | "MP4로 내보내기"에 자막 포함 옵션. 구간 순서·배속에 맞춰 시간을 다시 계산하고 영상에 입힘. SRT 파일만 따로 받기도 가능 |
 
 ### 동작 흐름
@@ -36,6 +40,10 @@
 
 OpenAI 키는 로컬 백엔드(`OPENAI_API_KEY`)에서만 사용하고 GPU 서버로는 보내지 않습니다.
 
+### 편집 화면 공통
+- 되돌리기/다시 실행(⌘/Ctrl + Z, ⌘/Ctrl + Shift + Z): 하이라이트 구간 편집, 배속·음소거, 삭제, 자막, 자막 기본 스타일이 대상. 끌기처럼 이어진 변경은 한 번으로 묶고, 추가·삭제처럼 한 번에 끝나는 작업은 각각 기록
+- 파형 확대/축소(⌘/Ctrl + 스크롤, 버튼), AI 어시스턴트는 헤더 버튼으로 여닫는 오른쪽 열
+
 ## 2. 실행 방법 (현재 환경)
 
 - **프론트엔드·백엔드**: 로컬에서 직접 실행(맥에 Docker 없음). Docker가 있으면 README의 `docker compose up -d --build`를 사용.
@@ -46,11 +54,18 @@ OpenAI 키는 로컬 백엔드(`OPENAI_API_KEY`)에서만 사용하고 GPU 서�
   PYTHONPATH=/shareHost/jiyes/packages /usr/bin/python3 -m uvicorn server:app --host 0.0.0.0 --port 8001
   ```
   기본 `python3`(conda 3.9)로 실행하면 `TypeAlias` 임포트 오류가 납니다. 컨테이너가 꺼져 있으면 먼저 시작해야 하고, 재시작하면 서버를 다시 띄워야 합니다.
+- **ReVision 구간 탐색 서비스**(기존 CLIP 검색 + Video-LLaVA 대체, 별도 프로세스, 포트 8002, 컨테이너 안): GPU 서버와 패키지 버전이 달라서(`transformers 4.41.2` 등) ReVision 환경(팀원 환경 `/shareHost/minyoy/venvs/revaudio`)에서 따로 띄웁니다. 가중치와 코드는 `/shareHost/jiyes/ClipCraft-AI/`에 있습니다.
+  ```bash
+  cd /shareHost/jiyes/ClipCraft-AI/scripts
+  REVISION_ROOT=/shareHost/jiyes/ClipCraft-AI /shareHost/minyoy/venvs/revaudio/bin/python revision_server.py
+  ```
+  - GPU 서버는 `ANALYSIS_ENGINE=revision`(기본)일 때 이 서비스를 부릅니다. 서비스에 연결할 수 없으면 기존 CLIP 검색으로 돌아가고 작업 로그에 경고를 남깁니다. `ANALYSIS_ENGINE=clip`이면 기존 방식만 씁니다.
+  - ReVision은 영어 질문 기준이라 로컬 백엔드가 시나리오를 영어로 바꿔 `queries_en`으로 함께 보냅니다(OpenAI 키가 없으면 원문으로 탐색).
 - **로컬 ↔ GPU 서버 연결**: GPU 컨테이너의 8001 포트는 외부에 열려 있지 않아서 SSH 포트 포워딩(`localhost:8001`)으로 연결합니다.
 - **설치 위치(GPU 컨테이너)**
   - Whisper 패키지: `/shareHost/jiyes/packages` (`faster-whisper`, `ctranslate2`, `onnxruntime`)
   - Whisper 모델: `/shareHost/jiye_model` (`Systran/faster-whisper-large-v3`)
-  - 자막 폰트: `/shareHost/jiyes/fonts` (나눔고딕, 고딕 A1, IBM Plex Sans KR, 나눔명조, 블랙한산스, 도현, 주아, 고운돋움, 나눔손글씨 펜 — 모두 무료 오픈 라이선스)
+  - 자막 폰트: `/shareHost/jiyes/fonts` (추가 언어용 Noto Sans JP·SC·Thai·Latin 포함, 나눔고딕, 고딕 A1, IBM Plex Sans KR, 나눔명조, 블랙한산스, 도현, 주아, 고운돋움, 나눔손글씨 펜 — 모두 무료 오픈 라이선스)
 - 자막 폰트 id ↔ 폰트 이름은 GPU 서버 `SUBTITLE_FONTS`와 프론트 `SUBTITLE_FONT_OPTIONS`가 같아야 합니다.
 
 측정값(TTS 샘플 기준): 7분 45초 한국어 음성의 Whisper 인식 약 14초.

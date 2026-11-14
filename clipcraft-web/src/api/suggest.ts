@@ -1,6 +1,6 @@
 import { requestJson } from '@/api/client';
 
-export type SuggestTone = 'descriptive' | 'emotional' | 'funny';
+export type SuggestTone = 'descriptive' | 'emotional' | 'funny' | 'impact';
 /** scenario: 시나리오 문장만 근거로 / video: 영상 프레임만 근거로 */
 export type SuggestBasis = 'scenario' | 'video';
 
@@ -8,6 +8,7 @@ export const SUGGEST_TONE_OPTIONS: Array<{ value: SuggestTone; label: string }> 
   { value: 'descriptive', label: '설명형' },
   { value: 'emotional', label: '감성형' },
   { value: 'funny', label: '유머형' },
+  { value: 'impact', label: '임팩트형' },
 ];
 
 export interface SuggestItem {

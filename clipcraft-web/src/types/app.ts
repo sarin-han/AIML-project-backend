@@ -99,14 +99,26 @@ export type ChatMessage =
       };
     };
 
+/** 이 자막만 기본 스타일 대신 쓰는 값 */
+export interface SubtitleCueStyle {
+  font?: string;
+  size?: number;
+  color?: string;
+  box?: boolean;
+}
+
 export interface SubtitleCue {
   id: number;
   start: number;
   end: number;
   text: string;
   original?: string;
+  /** 아래 줄에 덧붙이는 다른 언어 자막(번역). 언어는 자막 스타일의 extraLang */
+  extra?: string;
   /** 자막 가운데의 가로 위치(영상 가로 대비 %). 없으면 가운데 */
   x?: number;
   /** 영상 아래쪽에서 자막까지의 거리(세로 대비 %). 없으면 스타일의 기본 위치 */
   y?: number;
+  /** 이 자막만의 폰트·크기·색·박스 */
+  style?: SubtitleCueStyle;
 }

@@ -40,6 +40,9 @@ export async function addScenarios(page: Page) {
 }
 
 export async function mockAnalysisApi(page: Page) {
+  // 채팅 편집 서버(LLM)에는 닿지 않게 막는다. 화면은 예전의 정해진 명령 처리로 대신한다. 필요한 테스트는 이 경로를 다시 mock한다.
+  await page.route('**/chat/edit', (route: Route) => route.abort());
+
   await page.route('**/analyze/jobs', async (route: Route) => {
     if (route.request().method() !== 'POST') {
       await route.fallback();
