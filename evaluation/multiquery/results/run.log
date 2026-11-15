@@ -1,0 +1,506 @@
+[run_eval] start Sun Nov 15 07:40:16 UTC 2026
+Loading VTimeLLM from base model...
+You are using a model of type llama to instantiate a model of type VTimeLLM. This is not supported for all configurations of models and can yield errors.
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [01:13<01:13, 73.58s/it]Loading checkpoint shards: 100%|██████████| 2/2 [01:40<00:00, 45.87s/it]Loading checkpoint shards: 100%|██████████| 2/2 [01:40<00:00, 50.02s/it]
+/home/ubuntu/clipcraft/.venv/lib/python3.12/site-packages/transformers/generation/configuration_utils.py:515: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.9` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`. This was detected when initializing the generation config instance, which means the corresponding file may hold incorrect parameterization and should be fixed.
+  warnings.warn(
+/home/ubuntu/clipcraft/.venv/lib/python3.12/site-packages/transformers/generation/configuration_utils.py:520: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.6` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`. This was detected when initializing the generation config instance, which means the corresponding file may hold incorrect parameterization and should be fixed.
+  warnings.warn(
+/home/ubuntu/clipcraft/.venv/lib/python3.12/site-packages/transformers/generation/configuration_utils.py:515: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.9` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`.
+  warnings.warn(
+/home/ubuntu/clipcraft/.venv/lib/python3.12/site-packages/transformers/generation/configuration_utils.py:520: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.6` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`.
+  warnings.warn(
+/home/ubuntu/clipcraft/ClipCraft-AI/revisionllm/model/vtimellm_arch.py:69: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  mm_projector_weights = torch.load(pretrain_mm_mlp_adapter, map_location='cpu')
+load mlp: checkpoints/vtimellm-vicuna-v1-5-7b-stage1/mm_projector.bin
+/home/ubuntu/clipcraft/ClipCraft-AI/revisionllm/model/vtimellm_arch.py:85: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  mm_projector_weights = torch.load(model_args.pretrain_clip_adapter, map_location='cpu')
+load clip adapter: checkpoints/public/chapters_stage1_sparse/non_lora_trainables.bin
+Loading stage2 weights...
+/home/ubuntu/clipcraft/ClipCraft-AI/revisionllm/model/builder.py:12: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  non_lora_trainables = torch.load(non_lora_trainables_path, map_location='cpu')
+Loading LoRA weights...
+Merging stage2 weights...
+Loading CLIP models
+[exp1] warm-up (not measured)
+/home/ubuntu/clipcraft/ClipCraft-AI/revisionllm/data/audio_pipeline/extract_clip.py:85: UserWarning: The given NumPy array is not writable, and PyTorch does not support non-writable tensors. This means writing to this tensor will result in undefined behavior. You may want to copy the array to protect its data or make it writable before converting it to a tensor. This type of warning will be suppressed for the rest of this program. (Triggered internally at ../torch/csrc/utils/tensor_numpy.cpp:206.)
+  x = torch.from_numpy(frames[b * self.batch_size:(b + 1) * self.batch_size]).to(self.device)
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=8 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=0 N= 1 Baseline               total=   32.27s extractions= 1 forwards=  1
+[multiquery] video_id=9 features=extracted duration=300.6s
+[exp1] rep=0 N= 1 Feature Cache          total=   32.23s extractions= 1 forwards=  1
+[multiquery] video_id=10 features=extracted duration=300.6s
+[exp1] rep=0 N= 1 Multi-Query (+ Batch)  total=   32.14s extractions= 1 forwards=  1
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=0 N= 5 Baseline               total=  161.89s extractions= 5 forwards=  5
+[multiquery] video_id=11 features=extracted duration=300.6s
+[multiquery] video_id=11 features=cache hit duration=300.6s
+[multiquery] video_id=11 features=cache hit duration=300.6s
+[multiquery] video_id=11 features=cache hit duration=300.6s
+[multiquery] video_id=11 features=cache hit duration=300.6s
+[exp1] rep=0 N= 5 Feature Cache          total=   34.60s extractions= 1 forwards=  5
+[multiquery] video_id=12 features=extracted duration=300.6s
+[exp1] rep=0 N= 5 Multi-Query (+ Batch)  total=   32.78s extractions= 1 forwards=  1
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=0 N=10 Baseline               total=  321.36s extractions=10 forwards= 10
+[multiquery] video_id=13 features=extracted duration=300.6s
+[multiquery] video_id=13 features=cache hit duration=300.6s
+[multiquery] video_id=13 features=cache hit duration=300.6s
+[multiquery] video_id=13 features=cache hit duration=300.6s
+[multiquery] video_id=13 features=cache hit duration=300.6s
+[multiquery] video_id=13 features=cache hit duration=300.6s
+[multiquery] video_id=13 features=cache hit duration=300.6s
+[multiquery] video_id=13 features=cache hit duration=300.6s
+[multiquery] video_id=13 features=cache hit duration=300.6s
+[multiquery] video_id=13 features=cache hit duration=300.6s
+[exp1] rep=0 N=10 Feature Cache          total=   37.43s extractions= 1 forwards= 10
+[multiquery] video_id=14 features=extracted duration=300.6s
+[exp1] rep=0 N=10 Multi-Query (+ Batch)  total=   33.43s extractions= 1 forwards=  2
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=0 N=20 Baseline               total=  642.55s extractions=20 forwards= 20
+[multiquery] video_id=15 features=extracted duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[multiquery] video_id=15 features=cache hit duration=300.6s
+[exp1] rep=0 N=20 Feature Cache          total=   42.74s extractions= 1 forwards= 20
+[multiquery] video_id=16 features=extracted duration=300.6s
+[exp1] rep=0 N=20 Multi-Query (+ Batch)  total=   34.88s extractions= 1 forwards=  3
+[multiquery] video_id=17 features=extracted duration=300.6s
+[exp1] rep=1 N= 1 Feature Cache          total=   32.22s extractions= 1 forwards=  1
+[multiquery] video_id=18 features=extracted duration=300.6s
+[exp1] rep=1 N= 1 Multi-Query (+ Batch)  total=   32.35s extractions= 1 forwards=  1
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=1 N= 1 Baseline               total=   32.39s extractions= 1 forwards=  1
+[multiquery] video_id=19 features=extracted duration=300.6s
+[multiquery] video_id=19 features=cache hit duration=300.6s
+[multiquery] video_id=19 features=cache hit duration=300.6s
+[multiquery] video_id=19 features=cache hit duration=300.6s
+[multiquery] video_id=19 features=cache hit duration=300.6s
+[exp1] rep=1 N= 5 Feature Cache          total=   34.82s extractions= 1 forwards=  5
+[multiquery] video_id=20 features=extracted duration=300.6s
+[exp1] rep=1 N= 5 Multi-Query (+ Batch)  total=   32.89s extractions= 1 forwards=  1
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=1 N= 5 Baseline               total=  161.77s extractions= 5 forwards=  5
+[multiquery] video_id=21 features=extracted duration=300.6s
+[multiquery] video_id=21 features=cache hit duration=300.6s
+[multiquery] video_id=21 features=cache hit duration=300.6s
+[multiquery] video_id=21 features=cache hit duration=300.6s
+[multiquery] video_id=21 features=cache hit duration=300.6s
+[multiquery] video_id=21 features=cache hit duration=300.6s
+[multiquery] video_id=21 features=cache hit duration=300.6s
+[multiquery] video_id=21 features=cache hit duration=300.6s
+[multiquery] video_id=21 features=cache hit duration=300.6s
+[multiquery] video_id=21 features=cache hit duration=300.6s
+[exp1] rep=1 N=10 Feature Cache          total=   37.49s extractions= 1 forwards= 10
+[multiquery] video_id=22 features=extracted duration=300.6s
+[exp1] rep=1 N=10 Multi-Query (+ Batch)  total=   33.41s extractions= 1 forwards=  2
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=1 N=10 Baseline               total=  320.77s extractions=10 forwards= 10
+[multiquery] video_id=23 features=extracted duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[multiquery] video_id=23 features=cache hit duration=300.6s
+[exp1] rep=1 N=20 Feature Cache          total=   42.93s extractions= 1 forwards= 20
+[multiquery] video_id=24 features=extracted duration=300.6s
+[exp1] rep=1 N=20 Multi-Query (+ Batch)  total=   35.20s extractions= 1 forwards=  3
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=1 N=20 Baseline               total=  643.96s extractions=20 forwards= 20
+[multiquery] video_id=25 features=extracted duration=300.6s
+[exp1] rep=2 N= 1 Multi-Query (+ Batch)  total=   32.46s extractions= 1 forwards=  1
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=2 N= 1 Baseline               total=   32.34s extractions= 1 forwards=  1
+[multiquery] video_id=26 features=extracted duration=300.6s
+[exp1] rep=2 N= 1 Feature Cache          total=   32.35s extractions= 1 forwards=  1
+[multiquery] video_id=27 features=extracted duration=300.6s
+[exp1] rep=2 N= 5 Multi-Query (+ Batch)  total=   32.83s extractions= 1 forwards=  1
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=2 N= 5 Baseline               total=  162.06s extractions= 5 forwards=  5
+[multiquery] video_id=28 features=extracted duration=300.6s
+[multiquery] video_id=28 features=cache hit duration=300.6s
+[multiquery] video_id=28 features=cache hit duration=300.6s
+[multiquery] video_id=28 features=cache hit duration=300.6s
+[multiquery] video_id=28 features=cache hit duration=300.6s
+[exp1] rep=2 N= 5 Feature Cache          total=   34.53s extractions= 1 forwards=  5
+[multiquery] video_id=29 features=extracted duration=300.6s
+[exp1] rep=2 N=10 Multi-Query (+ Batch)  total=   33.38s extractions= 1 forwards=  2
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=2 N=10 Baseline               total=  320.81s extractions=10 forwards= 10
+[multiquery] video_id=30 features=extracted duration=300.6s
+[multiquery] video_id=30 features=cache hit duration=300.6s
+[multiquery] video_id=30 features=cache hit duration=300.6s
+[multiquery] video_id=30 features=cache hit duration=300.6s
+[multiquery] video_id=30 features=cache hit duration=300.6s
+[multiquery] video_id=30 features=cache hit duration=300.6s
+[multiquery] video_id=30 features=cache hit duration=300.6s
+[multiquery] video_id=30 features=cache hit duration=300.6s
+[multiquery] video_id=30 features=cache hit duration=300.6s
+[multiquery] video_id=30 features=cache hit duration=300.6s
+[exp1] rep=2 N=10 Feature Cache          total=   37.62s extractions= 1 forwards= 10
+[multiquery] video_id=31 features=extracted duration=300.6s
+[exp1] rep=2 N=20 Multi-Query (+ Batch)  total=   35.18s extractions= 1 forwards=  3
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp1] rep=2 N=20 Baseline               total=  643.36s extractions=20 forwards= 20
+[multiquery] video_id=32 features=extracted duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[multiquery] video_id=32 features=cache hit duration=300.6s
+[exp1] rep=2 N=20 Feature Cache          total=   42.94s extractions= 1 forwards= 20
+
+condition, N, repeats, mean(s), std(s), min, max, extractions, forwards
+Baseline, 1, 3, 32.33, 0.06, 32.27, 32.39, 1.00, 1.00
+Baseline, 5, 3, 161.90, 0.15, 161.77, 162.06, 5.00, 5.00
+Baseline, 10, 3, 320.98, 0.33, 320.77, 321.36, 10.00, 10.00
+Baseline, 20, 3, 643.29, 0.71, 642.55, 643.96, 20.00, 20.00
+Feature Cache, 1, 3, 32.27, 0.07, 32.22, 32.35, 1.00, 1.00
+Feature Cache, 5, 3, 34.65, 0.15, 34.53, 34.82, 1.00, 5.00
+Feature Cache, 10, 3, 37.51, 0.10, 37.43, 37.62, 1.00, 10.00
+Feature Cache, 20, 3, 42.87, 0.12, 42.74, 42.94, 1.00, 20.00
+Multi-Query (+ Batch), 1, 3, 32.31, 0.16, 32.14, 32.46, 1.00, 1.00
+Multi-Query (+ Batch), 5, 3, 32.83, 0.05, 32.78, 32.89, 1.00, 1.00
+Multi-Query (+ Batch), 10, 3, 33.40, 0.02, 33.38, 33.43, 1.00, 2.00
+Multi-Query (+ Batch), 20, 3, 35.09, 0.18, 34.88, 35.20, 1.00, 3.00
+
+segment agreement with Baseline (max |start/end difference| in seconds, per N and repeat)
+  N= 1 rep=0 Feature Cache          max_diff=0.00s
+  N= 1 rep=0 Multi-Query (+ Batch)  max_diff=0.00s
+  N= 1 rep=1 Feature Cache          max_diff=0.00s
+  N= 1 rep=1 Multi-Query (+ Batch)  max_diff=0.00s
+  N= 1 rep=2 Feature Cache          max_diff=0.00s
+  N= 1 rep=2 Multi-Query (+ Batch)  max_diff=0.00s
+  N= 5 rep=0 Feature Cache          max_diff=0.00s
+  N= 5 rep=0 Multi-Query (+ Batch)  max_diff=56.51s
+  N= 5 rep=1 Feature Cache          max_diff=56.51s
+  N= 5 rep=1 Multi-Query (+ Batch)  max_diff=56.51s
+  N= 5 rep=2 Feature Cache          max_diff=56.51s
+  N= 5 rep=2 Multi-Query (+ Batch)  max_diff=1.20s
+  N=10 rep=0 Feature Cache          max_diff=272.91s
+  N=10 rep=0 Multi-Query (+ Batch)  max_diff=272.91s
+  N=10 rep=1 Feature Cache          max_diff=272.91s
+  N=10 rep=1 Multi-Query (+ Batch)  max_diff=272.91s
+  N=10 rep=2 Feature Cache          max_diff=272.91s
+  N=10 rep=2 Multi-Query (+ Batch)  max_diff=272.91s
+  N=20 rep=0 Feature Cache          max_diff=4.81s
+  N=20 rep=0 Multi-Query (+ Batch)  max_diff=56.51s
+  N=20 rep=1 Feature Cache          max_diff=2.40s
+  N=20 rep=1 Multi-Query (+ Batch)  max_diff=56.51s
+  N=20 rep=2 Feature Cache          max_diff=56.51s
+  N=20 rep=2 Multi-Query (+ Batch)  max_diff=272.91s
+[run_eval] exp1 exit=0 Sun Nov 15 08:55:44 UTC 2026
+Loading VTimeLLM from base model...
+You are using a model of type llama to instantiate a model of type VTimeLLM. This is not supported for all configurations of models and can yield errors.
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [01:13<01:13, 73.87s/it]Loading checkpoint shards: 100%|██████████| 2/2 [01:40<00:00, 46.00s/it]Loading checkpoint shards: 100%|██████████| 2/2 [01:40<00:00, 50.18s/it]
+/home/ubuntu/clipcraft/.venv/lib/python3.12/site-packages/transformers/generation/configuration_utils.py:515: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.9` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`. This was detected when initializing the generation config instance, which means the corresponding file may hold incorrect parameterization and should be fixed.
+  warnings.warn(
+/home/ubuntu/clipcraft/.venv/lib/python3.12/site-packages/transformers/generation/configuration_utils.py:520: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.6` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`. This was detected when initializing the generation config instance, which means the corresponding file may hold incorrect parameterization and should be fixed.
+  warnings.warn(
+/home/ubuntu/clipcraft/.venv/lib/python3.12/site-packages/transformers/generation/configuration_utils.py:515: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.9` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`.
+  warnings.warn(
+/home/ubuntu/clipcraft/.venv/lib/python3.12/site-packages/transformers/generation/configuration_utils.py:520: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.6` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`.
+  warnings.warn(
+/home/ubuntu/clipcraft/ClipCraft-AI/revisionllm/model/vtimellm_arch.py:69: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  mm_projector_weights = torch.load(pretrain_mm_mlp_adapter, map_location='cpu')
+load mlp: checkpoints/vtimellm-vicuna-v1-5-7b-stage1/mm_projector.bin
+/home/ubuntu/clipcraft/ClipCraft-AI/revisionllm/model/vtimellm_arch.py:85: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  mm_projector_weights = torch.load(model_args.pretrain_clip_adapter, map_location='cpu')
+load clip adapter: checkpoints/public/chapters_stage1_sparse/non_lora_trainables.bin
+Loading stage2 weights...
+/home/ubuntu/clipcraft/ClipCraft-AI/revisionllm/model/builder.py:12: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  non_lora_trainables = torch.load(non_lora_trainables_path, map_location='cpu')
+Loading LoRA weights...
+Merging stage2 weights...
+Loading CLIP models
+[exp2] warm-up (not measured)
+/home/ubuntu/clipcraft/ClipCraft-AI/revisionllm/data/audio_pipeline/extract_clip.py:85: UserWarning: The given NumPy array is not writable, and PyTorch does not support non-writable tensors. This means writing to this tensor will result in undefined behavior. You may want to copy the array to protect its data or make it writable before converting it to a tensor. This type of warning will be suppressed for the rest of this program. (Triggered internally at ../torch/csrc/utils/tensor_numpy.cpp:206.)
+  x = torch.from_numpy(frames[b * self.batch_size:(b + 1) * self.batch_size]).to(self.device)
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=33 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=0 users= 1 Without Shared Cache   total=   32.58s extractions= 1 forwards=  1
+[multiquery] video_id=34 features=extracted duration=300.6s
+[exp2] rep=0 users= 1 With Shared Cache      total=   32.47s extractions= 1 forwards=  1
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=0 users= 2 Without Shared Cache   total=   65.02s extractions= 2 forwards=  2
+[multiquery] video_id=35 features=extracted duration=300.6s
+[multiquery] video_id=35 features=cache hit duration=300.6s
+[exp2] rep=0 users= 2 With Shared Cache      total=   33.84s extractions= 1 forwards=  2
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=0 users= 5 Without Shared Cache   total=  162.55s extractions= 5 forwards=  5
+[multiquery] video_id=36 features=extracted duration=300.6s
+[multiquery] video_id=36 features=cache hit duration=300.6s
+[multiquery] video_id=36 features=cache hit duration=300.6s
+[multiquery] video_id=36 features=cache hit duration=300.6s
+[multiquery] video_id=36 features=cache hit duration=300.6s
+[exp2] rep=0 users= 5 With Shared Cache      total=   36.55s extractions= 1 forwards=  5
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=0 users=10 Without Shared Cache   total=  327.96s extractions=10 forwards= 10
+[multiquery] video_id=37 features=extracted duration=300.6s
+[multiquery] video_id=37 features=cache hit duration=300.6s
+[multiquery] video_id=37 features=cache hit duration=300.6s
+[multiquery] video_id=37 features=cache hit duration=300.6s
+[multiquery] video_id=37 features=cache hit duration=300.6s
+[multiquery] video_id=37 features=cache hit duration=300.6s
+[multiquery] video_id=37 features=cache hit duration=300.6s
+[multiquery] video_id=37 features=cache hit duration=300.6s
+[multiquery] video_id=37 features=cache hit duration=300.6s
+[multiquery] video_id=37 features=cache hit duration=300.6s
+[exp2] rep=0 users=10 With Shared Cache      total=   41.66s extractions= 1 forwards= 10
+[multiquery] video_id=38 features=extracted duration=300.6s
+[exp2] rep=1 users= 1 With Shared Cache      total=   32.50s extractions= 1 forwards=  1
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=1 users= 1 Without Shared Cache   total=   32.48s extractions= 1 forwards=  1
+[multiquery] video_id=39 features=extracted duration=300.6s
+[multiquery] video_id=39 features=cache hit duration=300.6s
+[exp2] rep=1 users= 2 With Shared Cache      total=   33.48s extractions= 1 forwards=  2
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=1 users= 2 Without Shared Cache   total=   65.03s extractions= 2 forwards=  2
+[multiquery] video_id=40 features=extracted duration=300.6s
+[multiquery] video_id=40 features=cache hit duration=300.6s
+[multiquery] video_id=40 features=cache hit duration=300.6s
+[multiquery] video_id=40 features=cache hit duration=300.6s
+[multiquery] video_id=40 features=cache hit duration=300.6s
+[exp2] rep=1 users= 5 With Shared Cache      total=   36.69s extractions= 1 forwards=  5
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=1 users= 5 Without Shared Cache   total=  162.82s extractions= 5 forwards=  5
+[multiquery] video_id=41 features=extracted duration=300.6s
+[multiquery] video_id=41 features=cache hit duration=300.6s
+[multiquery] video_id=41 features=cache hit duration=300.6s
+[multiquery] video_id=41 features=cache hit duration=300.6s
+[multiquery] video_id=41 features=cache hit duration=300.6s
+[multiquery] video_id=41 features=cache hit duration=300.6s
+[multiquery] video_id=41 features=cache hit duration=300.6s
+[multiquery] video_id=41 features=cache hit duration=300.6s
+[multiquery] video_id=41 features=cache hit duration=300.6s
+[multiquery] video_id=41 features=cache hit duration=300.6s
+[exp2] rep=1 users=10 With Shared Cache      total=   42.01s extractions= 1 forwards= 10
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=1 users=10 Without Shared Cache   total=  326.67s extractions=10 forwards= 10
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=2 users= 1 Without Shared Cache   total=   32.44s extractions= 1 forwards=  1
+[multiquery] video_id=42 features=extracted duration=300.6s
+[exp2] rep=2 users= 1 With Shared Cache      total=   32.62s extractions= 1 forwards=  1
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=2 users= 2 Without Shared Cache   total=   65.18s extractions= 2 forwards=  2
+[multiquery] video_id=43 features=extracted duration=300.6s
+[multiquery] video_id=43 features=cache hit duration=300.6s
+[exp2] rep=2 users= 2 With Shared Cache      total=   33.55s extractions= 1 forwards=  2
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=2 users= 5 Without Shared Cache   total=  171.21s extractions= 5 forwards=  5
+[multiquery] video_id=44 features=extracted duration=300.6s
+[multiquery] video_id=44 features=cache hit duration=300.6s
+[multiquery] video_id=44 features=cache hit duration=300.6s
+[multiquery] video_id=44 features=cache hit duration=300.6s
+[multiquery] video_id=44 features=cache hit duration=300.6s
+[exp2] rep=2 users= 5 With Shared Cache      total=   40.18s extractions= 1 forwards=  5
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[multiquery] video_id=-1 features=extracted duration=300.6s
+[exp2] rep=2 users=10 Without Shared Cache   total=  328.33s extractions=10 forwards= 10
+[multiquery] video_id=45 features=extracted duration=300.6s
+[multiquery] video_id=45 features=cache hit duration=300.6s
+[multiquery] video_id=45 features=cache hit duration=300.6s
+[multiquery] video_id=45 features=cache hit duration=300.6s
+[multiquery] video_id=45 features=cache hit duration=300.6s
+[multiquery] video_id=45 features=cache hit duration=300.6s
+[multiquery] video_id=45 features=cache hit duration=300.6s
+[multiquery] video_id=45 features=cache hit duration=300.6s
+[multiquery] video_id=45 features=cache hit duration=300.6s
+[multiquery] video_id=45 features=cache hit duration=300.6s
+[exp2] rep=2 users=10 With Shared Cache      total=   41.64s extractions= 1 forwards= 10
+
+condition, users, repeats, mean(s), std(s), min, max, extractions, forwards
+Without Shared Cache, 1, 3, 32.50, 0.07, 32.44, 32.58, 1.00, 1.00
+Without Shared Cache, 2, 3, 65.07, 0.09, 65.02, 65.18, 2.00, 2.00
+Without Shared Cache, 5, 3, 165.52, 4.93, 162.55, 171.21, 5.00, 5.00
+Without Shared Cache, 10, 3, 327.65, 0.87, 326.67, 328.33, 10.00, 10.00
+With Shared Cache, 1, 3, 32.53, 0.08, 32.47, 32.62, 1.00, 1.00
+With Shared Cache, 2, 3, 33.62, 0.19, 33.48, 33.84, 1.00, 2.00
+With Shared Cache, 5, 3, 37.81, 2.06, 36.55, 40.18, 1.00, 5.00
+With Shared Cache, 10, 3, 41.77, 0.21, 41.64, 42.01, 1.00, 10.00
+[run_eval] exp2 exit=0 Sun Nov 15 09:36:04 UTC 2026
+[run_eval] ReVision service restarted Sun Nov 15 09:36:04 UTC 2026
