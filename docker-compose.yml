@@ -4,6 +4,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
+      # 비워 두면 backend/data/clipcraft.db(SQLite). PostgreSQL을 쓰려면 postgresql://사용자:비밀번호@호스트:5432/clipcraft
+      DATABASE_URL: ${DATABASE_URL:-}
       GPU_SERVER_URL: ${GPU_SERVER_URL:-http://host.docker.internal:8001}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     extra_hosts:

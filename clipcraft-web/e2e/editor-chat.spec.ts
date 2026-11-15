@@ -4,7 +4,9 @@ import { runAnalysisFlow } from './support/flows';
 type ChatBody = { clips: Array<{ id: number; start: number; end: number }>; confirm?: boolean; message: string; thread_id: string };
 
 async function send(page: import('@playwright/test').Page, message: string) {
-  if (!(await page.getByTestId('chat-input').isVisible())) await page.getByTestId('assistant-toggle').click();
+  // 서랍은 닫혀도 화면 밖에 남아 있으므로 열림 표시(data-open)로 판단한다
+  if ((await page.getByTestId('assistant-drawer').getAttribute('data-open')) !== '1') await page.getByTestId('assistant-toggle').click();
+  await expect(page.getByTestId('assistant-drawer')).toHaveAttribute('data-open', '1');
   await page.getByTestId('chat-input').fill(message);
   await page.getByTestId('chat-send-button').click();
 }
@@ -48,6 +50,8 @@ test('chat edit applies agent commands as one undo step and asks before deleting
   expect(bodies[1].thread_id).toBe(bodies[0].thread_id);
 
   await page.waitForTimeout(800);
+  // 열려 있는 어시스턴트 서랍이 상단 버튼을 가리므로 닫고 되돌린다
+  await page.getByTestId('assistant-drawer').getByRole('button', { name: 'AI 어시스턴트 닫기' }).click();
   await page.getByTestId('undo-button').click();
   await expect.poll(() => cardTitles(page)).toEqual(before);
   await expect(page.getByTestId('playback-rate-indicator')).toHaveCount(0);

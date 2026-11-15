@@ -16,3 +16,6 @@ ClipCraft-AI/
 
 # Playwright 결과물
 clipcraft-web/test-results/
+
+# 로컬 DB
+backend/data/*.db

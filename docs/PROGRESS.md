@@ -95,3 +95,11 @@ OpenAI 키는 로컬 백엔드(`OPENAI_API_KEY`)에서만 사용하고 GPU 서�
 - 겹치는 자막은 자동 정리하지 않음. 편집 화면 미리보기에서는 선택한 자막을 우선 표시.
 - 번역은 한국어 쪽만 지원.
 - 인증·프로젝트 저장 등 [API_SPEC.md](API_SPEC.md)의 미구현 API는 그대로 남아 있음.
+
+## 로그인·프로젝트 백엔드와 DB
+
+- `backend/app/`에 회원가입·로그인(JWT, refresh 토큰 회전)과 프로젝트 CRUD(`/api/v1`)가 있다. 기존 분석·자막·채팅 API(`server.py`)는 그대로 두고 같은 앱에 라우터로 붙였다.
+- DB는 `DATABASE_URL` 환경변수로 고른다. 비워 두면 `backend/data/clipcraft.db`(SQLite), 값이 있으면 그 DB를 쓴다. PostgreSQL 예: `DATABASE_URL=postgresql://사용자:비밀번호@호스트:5432/clipcraft` (드라이버 `psycopg`). 테이블은 첫 실행 때 자동 생성된다(마이그레이션 도구는 아직 없음).
+- 운영에서는 `JWT_SECRET`을 반드시 바꾼다(기본값은 개발용).
+- 아직 없는 것: 편집 상태 저장, 작업 기록, 분석 취소·재시도, 비밀번호 재설정 메일, 분석·번역·채팅 API의 로그인 검사.
+

@@ -13,6 +13,7 @@ export interface ProjectItem {
   scenes: number;
   sizeMB: number;
   starred: boolean;
+  version: number;
   status: ProjectStatus;
   title: string;
   updated: string;

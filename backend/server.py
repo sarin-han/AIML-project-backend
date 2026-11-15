@@ -7,6 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from app.database import init_db
+from app.envelope import register_error_handlers
+from app.routers import auth as auth_router
+from app.routers import projects as projects_router
 from edit_agent import make_graph, run_edit
 
 
@@ -17,6 +21,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 회원가입·로그인·프로젝트(/api/v1). 영상 분석 등 기존 경로는 그대로 둔다.
+init_db()
+register_error_handlers(app)
+app.include_router(auth_router.router)
+app.include_router(projects_router.router)
 
 GPU_SERVER_URL = os.environ.get("GPU_SERVER_URL", "http://host.docker.internal:8001").rstrip("/")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")

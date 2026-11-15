@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import type { Location, NavigateFunction } from 'react-router-dom';
@@ -9,8 +10,20 @@ import LandingScreen from '@/pages/LandingScreen';
 import ProjectsScreen from '@/pages/ProjectsScreen';
 import UploadScreen from '@/pages/UploadScreen';
 import { pageTransition } from '@/lib/animations';
+import { useAuth } from '@/lib/authContext';
 import { UploadSessionProvider } from '@/state/UploadSession';
 import type { HighlightAnalysisResult, HighlightExtractionResult, PendingHighlightAnalysis } from '@/types/app';
+
+/** 로그인하지 않았으면 로그인 화면으로 보낸다. 로그인 상태를 확인하는 동안에는 아무것도 그리지 않는다. */
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { loading, user } = useAuth();
+  const location = useLocation();
+
+  if (loading) return null;
+  if (!user) return <Navigate to="/auth" replace state={{ from: location }} />;
+
+  return children;
+}
 
 /** 하이라이트 결과 화면이 받는 라우트 상태 */
 interface HighlightResultState {
@@ -151,7 +164,9 @@ export default function AppRouter() {
           path="/upload"
           element={
             <motion.div className="min-h-screen" initial="hidden" animate="visible" exit="exit" variants={pageTransition}>
-              <UploadRoute />
+              <RequireAuth>
+                <UploadRoute />
+              </RequireAuth>
             </motion.div>
           }
         />
@@ -165,7 +180,9 @@ export default function AppRouter() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.3, ease: 'easeInOut' }}
             >
-              <AnalyzingRoute />
+              <RequireAuth>
+                <AnalyzingRoute />
+              </RequireAuth>
             </motion.div>
           }
         />
@@ -179,7 +196,9 @@ export default function AppRouter() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.3, ease: 'easeInOut' }}
             >
-              <HighlightResultRoute />
+              <RequireAuth>
+                <HighlightResultRoute />
+              </RequireAuth>
             </motion.div>
           }
         />
@@ -193,7 +212,9 @@ export default function AppRouter() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.4, ease: 'easeInOut' }}
             >
-              <EditorRoute />
+              <RequireAuth>
+                <EditorRoute />
+              </RequireAuth>
             </motion.div>
           }
         />
@@ -207,7 +228,9 @@ export default function AppRouter() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.4, ease: 'easeInOut' }}
             >
-              <EditorRoute />
+              <RequireAuth>
+                <EditorRoute />
+              </RequireAuth>
             </motion.div>
           }
         />
@@ -249,7 +272,9 @@ export default function AppRouter() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.3, ease: 'easeInOut' }}
             >
-              <ProjectsRoute />
+              <RequireAuth>
+                <ProjectsRoute />
+              </RequireAuth>
             </motion.div>
           }
         />
