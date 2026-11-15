@@ -326,14 +326,6 @@ SUGGEST_BATCH_SIZE = 5
 SUGGEST_MAX_ITEMS = 30
 SUGGEST_MAX_FRAMES = 3
 SUGGEST_MAX_FRAME_CHARS = 700_000
-SUGGEST_TONES = {
-    "descriptive": "차분하고 설명적인 톤. 장면에서 무슨 일이 일어나는지 간결하게 설명한다.",
-    "emotional": "감성적인 톤. 장면의 분위기와 감정을 짧고 시적으로 표현한다.",
-    "funny": "유머러스한 톤. 가볍고 재치 있게, 과하지 않게 표현한다.",
-    "impact": "짧고 강렬한 임팩트 톤. 보는 사람의 호기심을 끄는 한 줄 문구로 힘 있게 말한다. 과장하거나 낚시성 표현은 쓰지 않는다.",
-}
-
-
 SUGGEST_BASES = {"scenario", "video"}
 
 
@@ -346,13 +338,12 @@ class SuggestItem(BaseModel):
 
 
 class SuggestRequest(BaseModel):
-    tone: str = "descriptive"
     # scenario: 시나리오 문장만 근거로 / video: 영상 프레임만 근거로
     basis: str = "scenario"
     items: list[SuggestItem]
 
 
-async def suggest_batch(client: httpx.AsyncClient, tone_hint: str, items: list[SuggestItem], basis: str) -> dict[int, str]:
+async def suggest_batch(client: httpx.AsyncClient, items: list[SuggestItem], basis: str) -> dict[int, str]:
     content: list[dict] = []
     for item in items:
         if basis == "video":
@@ -376,23 +367,26 @@ async def suggest_batch(client: httpx.AsyncClient, tone_hint: str, items: list[S
             "프레임에 없는 인물 이름이나 사실은 지어내지 않는다. "
         )
     else:
-        grounding = "클립의 시나리오 문장만 근거로 쓴다. 시나리오를 그대로 베끼지 말고 자막다운 문구로 바꾼다. 문장에 없는 사실은 지어내지 않는다. "
+        grounding = (
+            "각 클립의 장면 설명을 자막으로 바꾼다. 장면 설명은 '~하는 장면' 꼴이므로 '장면'이라는 말을 빼고 현재형 평서문(~합니다, ~ㅂ니다)으로 쓴다. "
+            "예: '키위를 자르는 장면' -> '키위를 자릅니다.', '여자가 잠에서 깨는 장면' -> '여자가 잠에서 깹니다.', '김치찌개가 끓는 장면' -> '김치찌개가 끓습니다.' "
+            "설명에 없는 내용(감정, 분위기, 꾸미는 말, 상황)은 절대 덧붙이지 않고, 설명에 있는 동작·대상·장소는 빠뜨리지 않는다(예: '남자가 문을 열고 들어오는 장면' -> '남자가 문을 열고 들어옵니다.'). "
+        )
 
     response = await client.post(
         "https://api.openai.com/v1/chat/completions",
         headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
         json={
             "model": TRANSLATE_MODEL,
-            "temperature": 0.7,
+            "temperature": 0 if basis != "video" else 0.7,
             "response_format": {"type": "json_object"},
             "messages": [
                 {
                     "role": "system",
                     "content": (
-                        "너는 숏폼 영상의 한국어 자막 문구를 쓰는 작가다. 클립마다 자막을 정확히 하나 쓴다. "
-                        "각 자막은 공백 포함 20자 이내, 필요하면 \\n으로 두 줄(한 줄 14자 이내)로 나눈다. "
+                        "너는 영상의 한국어 자막 문구를 쓰는 작가다. 클립마다 자막을 정확히 하나 쓴다. "
+                        "자막은 한 줄이 기본이다. 공백 포함 14자를 넘을 때만 \\n으로 두 줄로 나누고(전체 28자 이내), 14자 이하면 줄바꿈 없이 쓴다. "
                         f"{grounding}"
-                        f"톤: {tone_hint} "
                         'JSON으로만 답한다: {"captions": [{"id": 클립번호, "text": "자막"}, ...]}'
                     ),
                 },
@@ -414,8 +408,6 @@ async def suggest_batch(client: httpx.AsyncClient, tone_hint: str, items: list[S
 async def suggest_subtitles(request: SuggestRequest):
     if not OPENAI_API_KEY:
         raise HTTPException(status_code=503, detail="OPENAI_API_KEY가 설정되지 않아 자막을 추천할 수 없습니다.")
-    if request.tone not in SUGGEST_TONES:
-        raise HTTPException(status_code=400, detail=f"지원하지 않는 톤입니다: {request.tone}")
     if request.basis not in SUGGEST_BASES:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 추천 기준입니다: {request.basis}")
     if not request.items or len(request.items) > SUGGEST_MAX_ITEMS:
@@ -433,7 +425,7 @@ async def suggest_subtitles(request: SuggestRequest):
     suggestions: dict[int, str] = {}
     async with httpx.AsyncClient(timeout=90.0) as client:
         for start in range(0, len(usable), SUGGEST_BATCH_SIZE):
-            suggestions.update(await suggest_batch(client, SUGGEST_TONES[request.tone], usable[start:start + SUGGEST_BATCH_SIZE], request.basis))
+            suggestions.update(await suggest_batch(client, usable[start:start + SUGGEST_BATCH_SIZE], request.basis))
 
     return {"suggestions": [{"id": item.id, "text": suggestions[item.id]} for item in usable if suggestions.get(item.id)]}
 

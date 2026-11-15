@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react';
-import { SUGGEST_TONE_OPTIONS } from '@/api/suggest';
-import type { SuggestTone } from '@/api/suggest';
 import { cueUsedBySegments, EXTRA_LANGUAGES, formatCueTime, SUBTITLE_COLORS, SUBTITLE_FONT_OPTIONS, SUBTITLE_POSITION_PRESETS } from '@/lib/subtitles';
 import type { SubtitleSetKey, SubtitleStyle } from '@/lib/subtitles';
 import type { SubtitleCue } from '@/types/app';
@@ -43,7 +41,7 @@ interface SubtitlePanelProps {
   onGenerate: () => void;
   onLanguageChange: (language: string) => void;
   onStyleChange: (style: SubtitleStyle) => void;
-  onSuggest: (tone: SuggestTone) => void;
+  onSuggest: () => void;
   onTranslateChange: (translate: boolean) => void;
   progress: number;
   selectedCueId: number | null;
@@ -258,21 +256,19 @@ export default function SubtitlePanel({
 
           {createMode === 'scenario' && (
             <div className="flex flex-wrap items-center gap-2 border-t border-[rgba(0,0,0,0.06)] pt-2.5">
-              <span className="text-[rgba(0,0,0,0.5)]">어떤 느낌으로? 고르면 바로 만들어요.</span>
-              {SUGGEST_TONE_OPTIONS.map((option) => (
-                <button
-                  className={chipClass}
-                  key={option.value}
-                  onClick={() => {
-                    setOpenSection(null);
-                    setCreateMode(null);
-                    onSuggest(option.value);
-                  }}
-                  type="button"
-                >
-                  {option.label}
-                </button>
-              ))}
+              <span className="text-[rgba(0,0,0,0.5)]">장면 설명을 그대로 자막으로 바꿔요. (예: 키위를 자르는 장면 → 키위를 자릅니다.)</span>
+              <button
+                className="cursor-pointer rounded-lg border-0 bg-black px-3 py-1 text-[12px] text-white"
+                data-testid="scenario-subtitle-create"
+                onClick={() => {
+                  setOpenSection(null);
+                  setCreateMode(null);
+                  onSuggest();
+                }}
+                type="button"
+              >
+                만들기
+              </button>
               {scenarioCount > 0 && <span className="text-[rgba(0,0,0,0.4)]">기존 시나리오 자막은 새로 만든 자막으로 바뀌어요. 음성 자막은 그대로 남아요.</span>}
             </div>
           )}

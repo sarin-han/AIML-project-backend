@@ -4,7 +4,6 @@ import { downloadExportedVideo, requestExportVideo } from '@/api/export';
 import { ApiError } from '@/api/client';
 import { requestChatEdit } from '@/api/chatEdit';
 import { requestSubtitleSuggestions } from '@/api/suggest';
-import type { SuggestTone } from '@/api/suggest';
 import { requestTranslations, translateCuesToKorean } from '@/api/translate';
 import { findScenarios } from '@/api/scenarios';
 import type { FoundScenario } from '@/api/scenarios';
@@ -591,7 +590,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     setSelectedCueId((current) => (current === cueId ? null : current));
   };
 
-  const onSuggestSubtitles = async (tone: SuggestTone) => {
+  const onSuggestSubtitles = async () => {
     if (segments.length === 0 || suggesting) return;
 
     setSuggesting(true);
@@ -605,7 +604,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
         duration: segment.end - segment.start,
         frames: [],
       }));
-      const captions = await requestSubtitleSuggestions(items, tone, 'scenario');
+      const captions = await requestSubtitleSuggestions(items, 'scenario');
       const captionById = new Map(captions.map((caption) => [caption.id, caption.text]));
 
       let nextId = 1;
