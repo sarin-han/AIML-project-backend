@@ -130,6 +130,26 @@ class EditingEngine:
             self._store_result(av, "api_highlights", title, result)
         return result
 
+    # ---- 시나리오 추천: 영상 요약 구간 → 구간 설명(GPT) → 편집 시나리오(제목·요약·장면별 설명과 이유) -----------------
+    def scenario(self, video_path: str, title: Optional[str]) -> dict:
+        """{"title", "summary", "scenes": [{"order", "start", "end", "description", "reason"}]}. 같은 영상·제목이면 저장해 둔 결과를 쓴다."""
+        self.report("score", 0.0)
+        plan = self.service.recommend(video_path, title=(title or "").strip() or "a video")
+        self.report("name", 1.0)
+        scenes = [
+            {
+                "order": index,
+                "start": round(float(scene["start"]), 1),
+                "end": round(float(scene["end"]), 1),
+                "description": scene.get("description", ""),
+                "reason": scene.get("reason", ""),
+            }
+            for index, scene in enumerate(plan.get("scenes", []), 1)
+        ]
+        if not scenes:
+            raise RuntimeError("추천할 시나리오를 만들지 못했어요.")
+        return {"title": plan.get("title", ""), "summary": plan.get("summary", ""), "scenes": scenes}
+
     # ---- 장면 추천 -------------------------------------------------------------------------------------------------
     def recommend(self, video_path: str, title: Optional[str]) -> List[dict]:
         """장면 이름과 그 장면이 영상의 어디인지(start/end 초)를 함께 돌려준다: [{"text", "start", "end"}].

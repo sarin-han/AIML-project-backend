@@ -9,6 +9,7 @@ import PillButton from '@/components/PillButton';
 import { icons } from '@/components/icons';
 import { buildEditorAnalysis, formatClock, totalDuration } from '@/lib/highlights';
 import { captureVideoThumbnail } from '@/lib/videoUpload';
+import { useProjectFrames } from '@/lib/useProjectFrames';
 import type { HighlightAnalysisResult, HighlightCandidate, HighlightExtractionResult } from '@/types/app';
 
 interface HighlightResultScreenProps {
@@ -21,9 +22,14 @@ interface HighlightResultScreenProps {
   onBack: () => void;
   onRetry: () => void;
   onNext: (analysis: HighlightAnalysisResult) => void;
+  /** 기본은 "시나리오 입력으로" (업로드 흐름). 편집 화면에서 연 경우 바꿔 쓴다. */
+  backLabel?: string;
+  startLabel?: string;
+  /** 서버에 저장된 프로젝트의 영상이면, 구간 미리보기를 서버가 뽑아 준다. */
+  projectId?: string;
 }
 
-export default function HighlightResultScreen({ extraction, jobId, projectName, videoPath, videoUrl, videoName, onBack, onRetry, onNext }: HighlightResultScreenProps) {
+export default function HighlightResultScreen({ extraction, jobId, projectName, videoPath, videoUrl, videoName, onBack, onRetry, onNext, backLabel = '시나리오 입력으로', startLabel = '선택한 구간으로 편집 시작', projectId }: HighlightResultScreenProps) {
   const { accent } = useTheme();
   const { highlights, duration, amplitudes } = extraction;
 
@@ -33,6 +39,7 @@ export default function HighlightResultScreen({ extraction, jobId, projectName, 
   const [playing, setPlaying] = useState(false);
   const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
   const videoRef = useRef<HTMLVideoElement>(null);
+  const { frameUrl, ready: framesReady } = useProjectFrames(projectId);
 
   const active = useMemo(() => highlights.find((item) => item.id === activeId) ?? null, [highlights, activeId]);
   const selectedHighlights = useMemo(() => highlights.filter((item) => selected.has(item.id)), [highlights, selected]);
@@ -42,6 +49,11 @@ export default function HighlightResultScreen({ extraction, jobId, projectName, 
   useEffect(() => {
     let cancelled = false;
     const pending = highlights.filter((item) => !item.thumbnail);
+    if (projectId && !framesReady) return;
+    if (frameUrl) {
+      setThumbnails(Object.fromEntries(pending.map((item) => [item.id, frameUrl((item.start + item.end) / 2)])));
+      return;
+    }
     (async () => {
       for (const item of pending) {
         try {
@@ -56,7 +68,7 @@ export default function HighlightResultScreen({ extraction, jobId, projectName, 
     return () => {
       cancelled = true;
     };
-  }, [highlights, videoUrl, duration]);
+  }, [highlights, videoUrl, duration, projectId, frameUrl, framesReady]);
 
   const seekTo = useCallback((seconds: number) => {
     const video = videoRef.current;
@@ -127,7 +139,7 @@ export default function HighlightResultScreen({ extraction, jobId, projectName, 
         className="inline-flex cursor-pointer items-center gap-[7px] rounded-full border border-line-soft bg-glass py-1.5 pr-3 pl-2.5 text-[12.5px] font-[500] tracking-[-0.1px] text-ink-72 transition-colors hover:bg-glass-hover"
       >
         <Icon d={icons.arrowL} size={13} strokeWidth={2} />
-        시나리오 입력으로
+        {backLabel}
       </button>
       <Logo height={32} />
     </div>
@@ -146,7 +158,7 @@ export default function HighlightResultScreen({ extraction, jobId, projectName, 
               다시 추출
             </PillButton>
             <PillButton variant="black" small onClick={onBack}>
-              시나리오 입력으로
+              {backLabel}
             </PillButton>
           </div>
         </div>
@@ -212,9 +224,10 @@ export default function HighlightResultScreen({ extraction, jobId, projectName, 
         </section>
 
         {/* 오른쪽: 하이라이트 구간 */}
-        <section className="flex flex-col gap-3 rounded-[14px] border border-line-soft bg-white p-5">
+        <section className="relative rounded-[14px] border border-line-soft bg-white max-[760px]:min-h-0 min-[761px]:min-h-[360px]">
+         <div className="flex flex-col gap-3 p-5 min-[761px]:absolute min-[761px]:inset-0">
           <MonoLabel>하이라이트 구간 · {highlights.length}</MonoLabel>
-          <div className="flex flex-col gap-2" data-testid="highlight-list">
+          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1 max-[760px]:max-h-[480px]" data-testid="highlight-list">
             {highlights.map((item) => (
               <HighlightRow
                 key={item.id}
@@ -228,6 +241,7 @@ export default function HighlightResultScreen({ extraction, jobId, projectName, 
               />
             ))}
           </div>
+         </div>
         </section>
       </div>
 
@@ -254,7 +268,7 @@ export default function HighlightResultScreen({ extraction, jobId, projectName, 
             testId="highlight-start-editing"
             className="max-[760px]:flex-[2] max-[760px]:justify-center"
           >
-            선택한 구간으로 편집 시작
+            {startLabel}
           </PillButton>
         </div>
       </div>

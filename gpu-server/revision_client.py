@@ -62,6 +62,11 @@ def recommend(video_path: str, title: Optional[str] = None, timeout: float = 900
     return _post("/recommend", {"video_path": video_path, "title": title, "request_id": request_id}, timeout)["scenes"]
 
 
+def scenario(video_path: str, title: Optional[str] = None, timeout: float = 900.0, request_id: Optional[str] = None) -> dict:
+    """영상을 보고 편집 시나리오를 추천한다. {"title", "summary", "scenes": [{"order", "start", "end", "description", "reason"}]}"""
+    return _post("/scenario", {"video_path": video_path, "title": title, "request_id": request_id}, timeout)
+
+
 def progress(request_id: str, timeout: float = 2.0) -> Optional[dict]:
     """ReVision 서비스가 이 요청에서 지금 하는 일. {"stage", "sub", "fraction", "detail", "done"} 또는 (알 수 없으면) None."""
     try:

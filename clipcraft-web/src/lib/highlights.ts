@@ -40,3 +40,22 @@ export function buildEditorAnalysis(
     ...meta,
   };
 }
+
+/** 추천받은 시나리오에서 고른 장면을 편집 화면이 받는 분석 결과로 바꾼다. 장면은 시간 순서대로 이어 붙인다. */
+export function buildScenarioAnalysis(
+  plan: { duration?: number; audio?: { barCount: number; amplitudes: number[] } },
+  scenes: { description: string; start: number; end: number }[],
+  meta: Pick<HighlightAnalysisResult, 'jobId' | 'projectId' | 'projectName' | 'videoPath' | 'videoUrl' | 'videoName'>,
+): HighlightAnalysisResult {
+  const segments: EditorHighlightSegment[] = [...scenes]
+    .sort((a, b) => a.start - b.start)
+    .map((scene, index) => ({ id: index + 1, sourceId: index + 1, scenario: scene.description, title: scene.description, start: scene.start, end: scene.end }));
+
+  return {
+    segments,
+    duration: plan.duration ?? 0,
+    barCount: plan.audio?.barCount ?? plan.audio?.amplitudes.length ?? 0,
+    amplitudes: plan.audio?.amplitudes ?? [],
+    ...meta,
+  };
+}

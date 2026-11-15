@@ -12,6 +12,7 @@ from app.database import get_db, init_db
 from app.envelope import register_error_handlers
 from app.routers import auth as auth_router
 from app.routers import projects as projects_router
+from app.routers.projects import ensure_project_gpu_video
 from app.projects_storage import save_project_video
 from sqlalchemy.orm import Session
 from edit_agent import make_graph, run_edit
@@ -173,6 +174,71 @@ async def start_highlight_job(
     store_project_video(db, current_user, project_id, video, content)
     await video.seek(0)
     response = await forward_video("/highlights/jobs", video, data)
+    raise_upstream_error(response)
+    return response.json()
+
+
+class FromProjectBody(BaseModel):
+    project_id: str
+
+
+async def start_job_from_project(kind: str, body: FromProjectBody, user: models.User, db: Session) -> dict:
+    """저장된 프로젝트 영상으로 하이라이트 추출·시나리오 추천을 시작한다. 영상을 브라우저에서 다시 올리지 않는다."""
+    project = db.get(models.Project, body.project_id)
+    if not project or project.user_id != user.id or project.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없어요.")
+
+    video_path = await ensure_project_gpu_video(db, project.id)
+    if not video_path:
+        raise HTTPException(status_code=404, detail="이 프로젝트에 저장된 영상이 없어요. 영상을 다시 올려 주세요.")
+
+    payload = {"video_path": video_path, "project_name": project.title}
+    if title_en := await project_title_en(project.title):
+        payload["title_en"] = title_en
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(f"{GPU_SERVER_URL}/{kind}/jobs/from-path", json=payload)
+
+    raise_upstream_error(response)
+    return {**response.json(), "video_path": video_path}
+
+
+@app.post("/scenario/jobs")
+async def start_scenario_job(
+    video: UploadFile = File(...),
+    project_name: str = Form(...),
+    project_id: str | None = Form(None),
+    current_user: models.User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """업로드 화면에서 올린 영상으로 시나리오 추천을 시작한다. 영상은 프로젝트에도 저장한다."""
+    data = {"project_name": project_name}
+    if title_en := await project_title_en(project_name):
+        data["title_en"] = title_en
+
+    content = await video.read()
+    store_project_video(db, current_user, project_id, video, content)
+    await video.seek(0)
+    response = await forward_video("/scenario/jobs", video, data)
+    raise_upstream_error(response)
+    return response.json()
+
+
+@app.post("/highlights/jobs/from-project")
+async def start_highlight_job_from_project(body: FromProjectBody, current_user: models.User = Depends(security.get_current_user), db: Session = Depends(get_db)):
+    return await start_job_from_project("highlights", body, current_user, db)
+
+
+@app.post("/scenario/jobs/from-project")
+async def start_scenario_job_from_project(body: FromProjectBody, current_user: models.User = Depends(security.get_current_user), db: Session = Depends(get_db)):
+    return await start_job_from_project("scenario", body, current_user, db)
+
+
+@app.get("/scenario/jobs/{job_id}", dependencies=[Depends(security.get_current_user)])
+async def get_scenario_job(job_id: str):
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(f"{GPU_SERVER_URL}/scenario/jobs/{job_id}")
+
     raise_upstream_error(response)
     return response.json()
 

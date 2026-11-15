@@ -8,10 +8,14 @@ interface ScenarioAddBarProps {
   accent: string;
   /** 영상에서 장면을 찾아 목록에 넣는다. 실패하면 사용자에게 보여 줄 문구를, 성공하면 null을 돌려준다. */
   onAdd: (scenario: string) => Promise<string | null>;
+  /** 영상에서 시나리오를 추천받는 화면으로 간다. 없으면 버튼을 보이지 않는다. */
+  onOpenRecommend?: () => void;
+  /** 영상 전체에서 하이라이트를 추출하는 화면으로 간다. 없으면 버튼을 보이지 않는다. */
+  onOpenHighlights?: () => void;
 }
 
 /** 편집 화면에서 시나리오(찾고 싶은 장면)를 하나 더 입력해 구간 목록 끝에 추가한다. */
-export default function ScenarioAddBar({ accent, onAdd }: ScenarioAddBarProps) {
+export default function ScenarioAddBar({ accent, onAdd, onOpenRecommend, onOpenHighlights }: ScenarioAddBarProps) {
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -41,6 +45,32 @@ export default function ScenarioAddBar({ accent, onAdd }: ScenarioAddBarProps) {
 
   return (
     <div className="ed-foot border-t border-line-soft bg-white px-4 py-3" data-testid="editor-scenario-add">
+      {(onOpenRecommend || onOpenHighlights) && (
+        <div className="mb-3 flex gap-2">
+          {onOpenRecommend && (
+            <button
+              className="inline-flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-line-soft bg-white px-3 py-2 text-[12.5px] font-[500] tracking-[-0.1px] text-ink-72 transition-colors hover:bg-black/[0.03]"
+              data-testid="editor-open-recommend"
+              onClick={onOpenRecommend}
+              type="button"
+            >
+              <Icon d={icons.wand} size={13} stroke="currentColor" strokeWidth={2} />
+              AI 시나리오 추천
+            </button>
+          )}
+          {onOpenHighlights && (
+            <button
+              className="inline-flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-line-soft bg-white px-3 py-2 text-[12.5px] font-[500] tracking-[-0.1px] text-ink-72 transition-colors hover:bg-black/[0.03]"
+              data-testid="editor-open-highlights"
+              onClick={onOpenHighlights}
+              type="button"
+            >
+              <Icon d={icons.zap} size={13} stroke="currentColor" strokeWidth={2} />
+              하이라이트 추출
+            </button>
+          )}
+        </div>
+      )}
       <div className="mb-2 flex items-center justify-between">
         <MonoLabel>시나리오 추가</MonoLabel>
         <span className="text-[11px] whitespace-nowrap text-ink-56">영상에서 찾아 목록 끝에 넣어요</span>

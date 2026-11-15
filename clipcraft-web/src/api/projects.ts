@@ -102,3 +102,9 @@ export async function saveProjectState(accessToken: string, projectId: string, i
   const { data } = await requestApiV1<ApiProject>(`/projects/${projectId}/state`, { method: 'PUT', body: JSON.stringify(input) }, accessToken);
   return data;
 }
+
+/** <img>·<video> 주소에 실을 프로젝트 전용 단기 토큰 */
+export async function getVideoToken(accessToken: string, projectId: string): Promise<string> {
+  const { data } = await requestApiV1<{ token: string }>(`/projects/${projectId}/video-token`, {}, accessToken);
+  return data.token;
+}

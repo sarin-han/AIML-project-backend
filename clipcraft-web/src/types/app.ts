@@ -23,8 +23,8 @@ export interface ScenarioItem {
 /** 업로드 화면에서 고르는 "찾는 방법" */
 export type FindMethod = 'manual' | 'recommend' | 'highlight';
 
-/** 분석 모드: scenario는 입력한 장면을 찾고, highlight는 시나리오 없이 영상 전체를 분석한다. */
-export type AnalysisMode = 'scenario' | 'highlight';
+/** 분석 모드: scenario는 입력한 장면을 찾고, highlight는 시나리오 없이 영상 전체를 분석하고, recommend는 AI가 시나리오(장면 구성)를 추천한다. */
+export type AnalysisMode = 'scenario' | 'highlight' | 'recommend';
 
 /** 하이라이트 후보 구간 (초 단위) */
 export interface HighlightCandidate {

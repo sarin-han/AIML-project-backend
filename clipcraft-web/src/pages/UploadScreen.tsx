@@ -26,6 +26,10 @@ export default function UploadFlow({ initialProjectName, onBack, onNext }: Uploa
     if (initialProjectName?.trim()) setProjectTitle(initialProjectName.trim());
   }, [initialProjectName, setProjectTitle]);
   const trimmedTitle = projectTitle.trim();
+  // 영상을 올리면 파일 이름을 제목 기본값으로 채운다. 사용자가 고치면 그 값을 지키고, 고치지 않았으면 다른 영상을 올릴 때 따라 바뀐다.
+  const titleRef = useRef(projectTitle);
+  titleRef.current = projectTitle;
+  const autoTitleRef = useRef<string | null>(null);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(uploadedVideo?.file ?? null);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>(uploadedVideo ? 'success' : 'idle');
@@ -60,8 +64,11 @@ export default function UploadFlow({ initialProjectName, onBack, onNext }: Uploa
 
   const useEmptyStateDesign = !hasUploadedVideo;
   const isHighlightMethod = method === 'highlight';
+  const isRecommendMethod = method === 'recommend';
+  // 하이라이트·추천받기는 장면을 직접 적지 않고 시작한다.
+  const needsScenarios = !isHighlightMethod && !isRecommendMethod;
   const hasScenario = items.length > 0;
-  const canStart = hasUploadedVideo && trimmedTitle.length > 0 && (isHighlightMethod || hasScenario);
+  const canStart = hasUploadedVideo && trimmedTitle.length > 0 && (!needsScenarios || hasScenario);
 
   const triggerUploadError = (message: string) => {
     setUploadError(message);
@@ -95,6 +102,11 @@ export default function UploadFlow({ initialProjectName, onBack, onNext }: Uploa
 
       const thumbnailUrl = await captureVideoThumbnail(objectUrl, duration);
       setUploadedVideo({ file, fileName: file.name, duration, durationLabel: formatDuration(duration), sizeLabel: formatFileSize(file.size), thumbnailUrl, objectUrl });
+      const defaultTitle = file.name.replace(/\.[^/.]+$/, '').trim().slice(0, 100);
+      if (defaultTitle && (!titleRef.current.trim() || titleRef.current === autoTitleRef.current)) {
+        autoTitleRef.current = defaultTitle;
+        setProjectTitle(defaultTitle);
+      }
       setSelectedFile(file);
       setUploadStatus('success');
       setUploadError(null);
@@ -109,8 +121,8 @@ export default function UploadFlow({ initialProjectName, onBack, onNext }: Uploa
     onNext({
       file: uploadedVideo.file,
       projectName: trimmedTitle,
-      mode: isHighlightMethod ? 'highlight' : 'scenario',
-      scenarios: isHighlightMethod ? [] : items,
+      mode: isHighlightMethod ? 'highlight' : isRecommendMethod ? 'recommend' : 'scenario',
+      scenarios: needsScenarios ? items : [],
       videoPath: '',
       videoUrl: uploadedVideo.objectUrl,
       videoName: uploadedVideo.fileName,
@@ -118,8 +130,8 @@ export default function UploadFlow({ initialProjectName, onBack, onNext }: Uploa
     });
   };
 
-  const ctaLabel = isHighlightMethod ? '하이라이트 추출하기' : `시나리오로 장면 찾기${items.length ? ` · ${items.length}개` : ''}`;
-  const checklist: [string, boolean][] = isHighlightMethod
+  const ctaLabel = isHighlightMethod ? '하이라이트 추출하기' : isRecommendMethod ? '시나리오로 장면 찾기' : `시나리오로 장면 찾기${items.length ? ` · ${items.length}개` : ''}`;
+  const checklist: [string, boolean][] = !needsScenarios
     ? [
         ['프로젝트 제목', trimmedTitle.length > 0],
         ['영상 업로드', hasUploadedVideo],
@@ -164,9 +176,7 @@ export default function UploadFlow({ initialProjectName, onBack, onNext }: Uploa
           onMethodChange={setMethod}
           items={items}
           onItemsChange={setItems}
-          videoFile={hasUploadedVideo ? uploadedVideo.file : null}
           videoDurationLabel={hasUploadedVideo ? uploadedVideo.durationLabel : undefined}
-          projectName={trimmedTitle || undefined}
         />
       </motion.div>
 

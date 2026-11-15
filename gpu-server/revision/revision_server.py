@@ -236,6 +236,8 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if self.path == "/highlights":
                         result = engine.editing.highlights(path, title)
+                    elif self.path == "/scenario":
+                        result = engine.editing.scenario(path, title)
                     else:
                         result = {"scenes": engine.editing.recommend(path, title)}
                 finally:
@@ -251,7 +253,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, {"error": str(error)})
 
     def do_POST(self):
-        if self.path in ("/highlights", "/recommend"):
+        if self.path in ("/highlights", "/recommend", "/scenario"):
             self._editing_request()
             return
         if self.path != "/ground":

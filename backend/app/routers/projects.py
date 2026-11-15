@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .. import models, security
-from ..projects_storage import copy_project_data, get_or_create_data, video_file
+from ..projects_storage import copy_project_data, frame_image, get_or_create_data, video_file
 from ..database import get_db
 from ..envelope import ApiError, envelope, envelope_list
 from ..schemas import (
@@ -228,6 +228,20 @@ async def _ensure_gpu_copy(row: models.ProjectData, stored: "os.PathLike | None"
     return row.gpu_video_path
 
 
+async def ensure_project_gpu_video(db: Session, project_id: str) -> str | None:
+    """프로젝트 영상의 GPU 서버 사본 경로. 사라졌으면 저장해 둔 영상으로 다시 만들어 돌려준다."""
+    row = db.get(models.ProjectData, project_id)
+    if row is None:
+        return None
+
+    path = await _ensure_gpu_copy(row, video_file(row))
+    if path != row.gpu_video_path:
+        row.gpu_video_path = path
+        db.add(row)
+        db.commit()
+    return path
+
+
 @router.get("/{project_id}/state")
 async def get_project_state(
     project_id: str,
@@ -339,3 +353,52 @@ def get_project_video(
         raise ApiError(404, "RESOURCE_NOT_FOUND", "저장된 영상이 없어요.")
 
     return FileResponse(path, media_type=row.video_content_type or "video/mp4", filename=None)
+
+
+def _project_for_media(project_id: str, token: str | None, authorization: str | None, db: Session) -> models.Project:
+    """영상·미리보기 이미지 요청의 사용자 확인: 주소의 영상 전용 토큰이나 Authorization 헤더."""
+    if token:
+        user_id = security.decode_video_token(token, project_id)
+    elif authorization and authorization.lower().startswith("bearer "):
+        user_id = security.decode_access_token(authorization.split(" ", 1)[1].strip())
+    else:
+        raise ApiError(401, "UNAUTHORIZED", "토큰이 없거나 만료되었습니다.")
+
+    project = db.get(models.Project, project_id)
+    if not project or project.user_id != user_id or project.deleted_at is not None:
+        raise ApiError(404, "RESOURCE_NOT_FOUND", "프로젝트를 찾을 수 없습니다.")
+    return project
+
+
+@router.get("/{project_id}/video-token")
+def get_video_token(
+    project_id: str,
+    current_user: models.User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """<img>·<video> 주소에 실을 이 프로젝트 전용 단기 토큰."""
+    _get_owned_project(db, current_user, project_id)
+    return envelope({"token": security.create_video_token(current_user.id, project_id)})
+
+
+@router.get("/{project_id}/frame")
+def get_project_frame(
+    project_id: str,
+    t: float = 0.0,
+    w: int = 320,
+    token: str | None = None,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """저장해 둔 영상의 t초 프레임(작은 JPEG). 구간 미리보기용으로, 영상을 통째로 받지 않고 서버가 바로 뽑아 준다."""
+    _project_for_media(project_id, token, authorization, db)
+    path = video_file(db.get(models.ProjectData, project_id))
+    if path is None:
+        raise ApiError(404, "RESOURCE_NOT_FOUND", "저장된 영상이 없어요.")
+
+    image = frame_image(project_id, path, t, min(640, max(80, w)))
+    if image is None:
+        raise ApiError(404, "RESOURCE_NOT_FOUND", "그 시각의 프레임을 만들지 못했어요.")
+
+    # 같은 주소(시각·너비)는 내용이 바뀌지 않으므로 브라우저가 오래 보관해도 된다.
+    return FileResponse(image, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})

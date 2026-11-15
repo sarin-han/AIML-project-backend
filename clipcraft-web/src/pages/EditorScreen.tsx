@@ -6,6 +6,7 @@ import { requestChatEdit } from '@/api/chatEdit';
 import { saveProjectState } from '@/api/projects';
 import { useAuth } from '@/lib/authContext';
 import { captureProjectThumbnail } from '@/lib/videoUpload';
+import { useProjectFrames } from '@/lib/useProjectFrames';
 import { requestSubtitleSuggestions } from '@/api/suggest';
 import { requestTranslations, translateCuesToKorean } from '@/api/translate';
 import { findScenarios } from '@/api/scenarios';
@@ -225,7 +226,7 @@ function snapshotsDiffer(a: EditSnapshot, b: EditSnapshot): boolean {
   return (Object.keys(a) as Array<keyof EditSnapshot>).some((key) => a[key] !== b[key]);
 }
 
-export default function EditorWorkspace({ analysis, onBack, projectName, videoPath, videoName, videoUrl, projectId, jobId, initialEditor, hasPreview }: EditorScreenProps) {
+export default function EditorWorkspace({ analysis, onBack, projectName, videoPath, videoName, videoUrl, projectId, jobId, initialEditor, hasPreview, onOpenRecommend, onOpenHighlights }: EditorScreenProps) {
   const { accent } = useTheme();
   const { accessToken } = useAuth();
   // 서버 프로젝트의 편집이면 브라우저 저장값(모든 프로젝트가 같이 쓰는 키) 대신 서버에 저장된 내용으로 시작한다.
@@ -333,11 +334,19 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
   }, [deletedSegmentIds]);
 
   // 구간 썸네일: 이미 만든 것(서버에 저장된 것 포함)은 다시 만들지 않고, 없는 것만 세 개씩 나눠서 만든다.
+  const { frameUrl, ready: framesReady } = useProjectFrames(projectId);
   const thumbCacheRef = useRef<Record<string, string>>({ ...(initialEditor?.thumbnails ?? {}) });
   const thumbKey = (segment: EditorHighlightSegment) => `${segment.id}:${segment.start.toFixed(2)}:${segment.end.toFixed(2)}`;
   useEffect(() => {
     if (!videoUrl || segments.length === 0) {
       setSegmentThumbnails({});
+      return;
+    }
+
+    // 서버에 저장된 영상이면 서버가 그 시각의 작은 이미지를 바로 뽑아 준다. 토큰을 받는 동안은 기다린다.
+    if (projectId && !framesReady) return;
+    if (frameUrl) {
+      setSegmentThumbnails(Object.fromEntries(segments.map((segment) => [segment.id, frameUrl((segment.start + segment.end) / 2)])));
       return;
     }
 
@@ -372,7 +381,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [segments, videoUrl]);
+  }, [segments, videoUrl, projectId, frameUrl, framesReady]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -818,6 +827,35 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
       });
   }, [projectId, accessToken, videoUrl, analysis?.duration]);
 
+  /** 서버에 저장하는 분석 결과 + 편집 내용 */
+  const buildStatePayload = () => ({
+    analysis: { segments: analysis?.segments ?? [], duration: analysis?.duration ?? 0, barCount: analysis?.barCount ?? 0, amplitudes: analysis?.amplitudes ?? [] },
+    editor: {
+      deletedSegmentIds,
+      extraSegments,
+      segmentEditSettings,
+      segments,
+      subtitleSets,
+      subtitleStyle,
+      // 만들어 둔 구간 썸네일도 저장해서, 프로젝트를 다시 열 때 영상에서 다시 뽑지 않게 한다.
+      thumbnails: Object.fromEntries(segments.filter((segment) => thumbCacheRef.current[thumbKey(segment)]).map((segment) => [thumbKey(segment), thumbCacheRef.current[thumbKey(segment)]])),
+    },
+    job_id: jobId,
+    video_path: videoPath,
+  });
+
+  /** 다른 화면(추천·하이라이트 추출)으로 나가기 전에 지금까지의 편집을 바로 저장한다. 그 화면이 서버에 저장된 편집 내용에 구간을 더하기 때문이다. */
+  const saveThenGo = async (go?: () => void) => {
+    if (projectId && accessToken) {
+      try {
+        await saveProjectState(accessToken, projectId, buildStatePayload());
+      } catch {
+        // 저장에 실패해도 이동은 막지 않는다.
+      }
+    }
+    go?.();
+  };
+
   // 서버 프로젝트의 편집 내용을 잠깐 모아서 저장한다. 저장된 내용으로 막 열었을 때는 바뀐 게 없으므로 첫 실행은 건너뛴다.
   const skipFirstSaveRef = useRef(Boolean(initialEditor));
   useEffect(() => {
@@ -828,21 +866,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     }
 
     const timer = window.setTimeout(() => {
-      saveProjectState(accessToken, projectId, {
-        analysis: { segments: analysis?.segments ?? [], duration: analysis?.duration ?? 0, barCount: analysis?.barCount ?? 0, amplitudes: analysis?.amplitudes ?? [] },
-        editor: {
-          deletedSegmentIds,
-          extraSegments,
-          segmentEditSettings,
-          segments,
-          subtitleSets,
-          subtitleStyle,
-          // 만들어 둔 구간 썸네일도 저장해서, 프로젝트를 다시 열 때 영상에서 다시 뽑지 않게 한다.
-          thumbnails: Object.fromEntries(segments.filter((segment) => thumbCacheRef.current[thumbKey(segment)]).map((segment) => [thumbKey(segment), thumbCacheRef.current[thumbKey(segment)]])),
-        },
-        job_id: jobId,
-        video_path: videoPath,
-      }).catch((error) => console.error('프로젝트 저장 실패', error));
+      saveProjectState(accessToken, projectId, buildStatePayload()).catch((error) => console.error('프로젝트 저장 실패', error));
     }, 1000);
 
     return () => window.clearTimeout(timer);
@@ -1267,7 +1291,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
               segments={segments}
               thumbnails={segmentThumbnails}
             />
-            <ScenarioAddBar accent={accent} onAdd={onScenarioAdd} />
+            <ScenarioAddBar accent={accent} onAdd={onScenarioAdd} onOpenHighlights={onOpenHighlights && projectId ? () => void saveThenGo(onOpenHighlights) : undefined} onOpenRecommend={onOpenRecommend && projectId ? () => void saveThenGo(onOpenRecommend) : undefined} />
           </>
         ) : (
           <SubtitlePanel

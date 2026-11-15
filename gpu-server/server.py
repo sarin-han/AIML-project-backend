@@ -648,14 +648,7 @@ def run_highlight_job(job_id: str, video_path: str, title: str | None):
         )
 
 
-@app.post("/highlights/jobs")
-async def start_highlight_job(
-    video: UploadFile = File(...),
-    project_name: str = Form(...),
-    title_en: Optional[str] = Form(None),
-):
-    video_path = save_upload_to_temp(await video.read(), video.filename)
-
+def create_highlight_job(project_name: str, video_path: str, title: str | None) -> str:
     job_id = uuid.uuid4().hex
     with analysis_jobs_lock:
         analysis_jobs[job_id] = {
@@ -675,8 +668,107 @@ async def start_highlight_job(
             "updated_at": time.time(),
         }
 
-    threading.Thread(target=run_highlight_job, args=(job_id, video_path, (title_en or "").strip() or None), daemon=True).start()
+    threading.Thread(target=run_highlight_job, args=(job_id, video_path, title), daemon=True).start()
+    return job_id
+
+
+@app.post("/highlights/jobs")
+async def start_highlight_job(
+    video: UploadFile = File(...),
+    project_name: str = Form(...),
+    title_en: Optional[str] = Form(None),
+):
+    video_path = save_upload_to_temp(await video.read(), video.filename)
+    job_id = create_highlight_job(project_name, video_path, (title_en or "").strip() or None)
     return {"status": "queued", "job_id": job_id}
+
+
+class FromPathRequest(BaseModel):
+    video_path: str
+    project_name: str = ""
+    title_en: Optional[str] = None
+
+
+@app.post("/highlights/jobs/from-path")
+async def start_highlight_job_from_path(request: FromPathRequest):
+    """이미 서버에 있는 영상(분석 때 올라온 임시 사본)으로 하이라이트 추출을 시작한다. 영상을 다시 올리지 않는다."""
+    video_path = resolve_uploaded_video(request.video_path)
+    job_id = create_highlight_job(request.project_name, video_path, (request.title_en or "").strip() or None)
+    return {"status": "queued", "job_id": job_id}
+
+
+def run_scenario_job(job_id: str, video_path: str, title: str | None):
+    try:
+        update_job(job_id, status="running", progress=10, message="영상을 훑어서 시나리오를 만드는 중...")
+        import revision_client
+        if not revision_client.is_available():
+            raise ReVisionUnavailableError(REVISION_UNAVAILABLE_MESSAGE)
+
+        plan = revision_client.scenario(video_path, title, request_id=job_id)
+
+        # 결과 화면의 타임라인에 쓸 길이와 오디오 파형(하이라이트 결과와 같은 모양)
+        update_job(job_id, progress=90, message="오디오 파형을 만드는 중...")
+        from audio.audio_waveform import extract_audio_waveform
+        audio = extract_audio_waveform(video_path, bar_count=HIGHLIGHT_WAVEFORM_BARS)
+        plan = {**plan, "duration": audio["duration"], "audio": {"barCount": audio["barCount"], "amplitudes": audio["amplitudes"]}}
+        update_job(job_id, status="success", progress=100, message="시나리오 추천 완료", result=plan)
+    except Exception as error:
+        print(f"❌ 시나리오 추천 에러: {error}")
+        import traceback
+        traceback.print_exc()
+        update_job(
+            job_id,
+            status="error",
+            error=str(error),
+            message=REVISION_UNAVAILABLE_MESSAGE if isinstance(error, ReVisionUnavailableError) else "시나리오 추천에 실패했습니다.",
+        )
+
+
+def create_scenario_job(project_name: str, video_path: str, title: str | None) -> str:
+    job_id = uuid.uuid4().hex
+    with analysis_jobs_lock:
+        analysis_jobs[job_id] = {
+            "status": "queued",
+            "progress": 0,
+            "message": "추천 대기 중입니다.",
+            "project": project_name,
+            "result": None,
+            "error": None,
+            "video_path": video_path,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+        }
+    threading.Thread(target=run_scenario_job, args=(job_id, video_path, title), daemon=True).start()
+    return job_id
+
+
+@app.post("/scenario/jobs/from-path")
+async def start_scenario_job_from_path(request: FromPathRequest):
+    """서버에 있는 영상으로 시나리오(제목·요약·장면별 설명)를 추천받는 작업을 시작한다."""
+    video_path = resolve_uploaded_video(request.video_path)
+    job_id = create_scenario_job(request.project_name, video_path, (request.title_en or "").strip() or None)
+    return {"status": "queued", "job_id": job_id}
+
+
+@app.post("/scenario/jobs")
+async def start_scenario_job(
+    video: UploadFile = File(...),
+    project_name: str = Form(""),
+    title_en: Optional[str] = Form(None),
+):
+    """업로드 화면에서 올린 영상으로 시나리오 추천을 시작한다."""
+    video_path = save_upload_to_temp(await video.read(), video.filename)
+    job_id = create_scenario_job(project_name, video_path, (title_en or "").strip() or None)
+    return {"status": "queued", "job_id": job_id}
+
+
+@app.get("/scenario/jobs/{job_id}")
+async def get_scenario_job(job_id: str):
+    with analysis_jobs_lock:
+        job = analysis_jobs.get(job_id)
+        if not job or "result" not in job:
+            raise HTTPException(status_code=404, detail="Scenario job not found")
+        return {key: job.get(key) for key in ("status", "progress", "message", "project", "video_path", "error", "result")}
 
 
 @app.get("/highlights/jobs/{job_id}")
@@ -939,7 +1031,8 @@ def run_export(request: ExportRequest, export_id: Optional[str] = None, on_progr
             validate_subtitle_style(request.subtitle_style or SubtitleStyle())
 
         source_has_audio = has_audio_stream(request.video_path)
-        total_steps = len(request.segments) + 1 + (1 if subtitle_cues else 0)
+        # 자막은 구간을 인코딩할 때 같이 입힌다(이어 붙인 뒤 전체를 다시 인코딩하지 않는다). 그래서 자막용 단계는 따로 없다.
+        total_steps = len(request.segments) + 1
 
         def report(done: int, label: str) -> None:
             if on_progress:
@@ -957,6 +1050,16 @@ def run_export(request: ExportRequest, export_id: Optional[str] = None, on_progr
             canvas_w, canvas_h, video_rect = compute_export_canvas(src_width, src_height, request.output_aspect)
             canvas = f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=decrease,pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,"
 
+        subtitle_style = request.subtitle_style or SubtitleStyle()
+        render_size = None
+        if subtitle_cues:
+            if not os.path.isdir(SUBTITLE_FONTS_DIR):
+                raise HTTPException(status_code=500, detail="자막 폰트 폴더를 찾을 수 없습니다.")
+            render_size = (canvas_w, canvas_h) if canvas else get_video_size(ffprobe, request.video_path)
+
+        clip_paths = []  # 이어 붙일 구간 파일(자막 파일 등 다른 임시 파일은 넣지 않는다)
+        output_offset = 0.0  # 지금 구간이 결과 영상에서 시작하는 시각(초). 자막 시각이 결과 영상 기준이라 구간별로 옮겨서 쓴다.
+
         for i, seg in enumerate(request.segments):
             temp_path = os.path.join(tmp_dir, f"clipcraft_{export_id}_clip_{i}.mp4")
             start = max(0.0, seg.start)
@@ -965,6 +1068,21 @@ def run_export(request: ExportRequest, export_id: Optional[str] = None, on_progr
             duration = end - start
             output_duration = duration / speed
             video_filter = f"[0:v]{canvas or ''}setpts=PTS/{speed:.6f}[v]"
+
+            if subtitle_cues:
+                clip_cues = []
+                for cue in subtitle_cues:
+                    cue_start = max(0.0, cue.start - output_offset)
+                    cue_end = min(output_duration, cue.end - output_offset)
+                    if cue_end > cue_start:
+                        clip_cues.append(cue.model_copy(update={"start": cue_start, "end": cue_end}))
+                if clip_cues:
+                    ass_path = os.path.join(tmp_dir, f"clipcraft_{export_id}_clip_{i}.ass")
+                    with open(ass_path, "w", encoding="utf-8") as f:
+                        f.write(build_ass(clip_cues, subtitle_style, render_size[0], render_size[1], video_rect))
+                    temp_files.append(ass_path)
+                    video_filter = f"[0:v]{canvas or ''}setpts=PTS/{speed:.6f}[vs];[vs]subtitles=filename={ass_path}:fontsdir={SUBTITLE_FONTS_DIR}[v]"
+            output_offset += output_duration
 
             if seg.muted or not source_has_audio:
                 filter_complex = f"{video_filter};[1:a]atrim=0:{output_duration:.6f},asetpts=PTS-STARTPTS[a]"
@@ -992,9 +1110,9 @@ def run_export(request: ExportRequest, export_id: Optional[str] = None, on_progr
                     "-c:v",
                     "libx264",
                     "-preset",
-                    "veryfast",
+                    "superfast",
                     "-crf",
-                    "23",
+                    "24",
                     "-c:a",
                     "aac",
                     "-shortest",
@@ -1021,9 +1139,9 @@ def run_export(request: ExportRequest, export_id: Optional[str] = None, on_progr
                     "-c:v",
                     "libx264",
                     "-preset",
-                    "veryfast",
+                    "superfast",
                     "-crf",
-                    "23",
+                    "24",
                     "-c:a",
                     "aac",
                     "-shortest",
@@ -1032,37 +1150,20 @@ def run_export(request: ExportRequest, export_id: Optional[str] = None, on_progr
 
             subprocess.run(command, check=True, capture_output=True)
             temp_files.append(temp_path)
+            clip_paths.append(temp_path)
             report(i + 1, f"구간 {i + 1}/{len(request.segments)} 완료")
         
         list_file = os.path.join(tmp_dir, f"clipcraft_{export_id}_clips_list.txt")
         with open(list_file, "w") as f:
-            for p in temp_files:
+            for p in clip_paths:
                 f.write(f"file '{p}'\n")
         temp_files.append(list_file)
 
-        concat_path = os.path.join(tmp_dir, f"clipcraft_{export_id}_concat.mp4") if subtitle_cues else output_path
         subprocess.run([
             ffmpeg, "-y", "-f", "concat", "-safe", "0",
-            "-i", list_file, "-c", "copy", concat_path
+            "-i", list_file, "-c", "copy", output_path
         ], check=True, capture_output=True)
         report(len(request.segments) + 1, "구간을 이어 붙이는 중")
-
-        if subtitle_cues:
-            if not os.path.isdir(SUBTITLE_FONTS_DIR):
-                raise HTTPException(status_code=500, detail="자막 폰트 폴더를 찾을 수 없습니다.")
-
-            ass_path = os.path.join(tmp_dir, f"clipcraft_{export_id}_subtitles.ass")
-            width, height = get_video_size(ffprobe, concat_path)
-            with open(ass_path, "w", encoding="utf-8") as f:
-                f.write(build_ass(subtitle_cues, request.subtitle_style or SubtitleStyle(), width, height, video_rect))
-            temp_files.extend([concat_path, ass_path])
-
-            subtitle_filter = f"subtitles=filename={ass_path}:fontsdir={SUBTITLE_FONTS_DIR}"
-            subprocess.run([
-                ffmpeg, "-y", "-i", concat_path, "-vf", subtitle_filter,
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "copy", output_path
-            ], check=True, capture_output=True)
-            report(total_steps, "자막을 입히는 중")
 
         return output_path
     except HTTPException:

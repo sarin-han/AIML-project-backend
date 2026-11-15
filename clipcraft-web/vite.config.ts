@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
       allowedHosts: ['.ngrok-free.app', '.ngrok-free.dev'],
       proxy: {
         '/api': backendUrl,
+        '/scenario': backendUrl,
         '/analyze': backendUrl,
         '/export': backendUrl,
         '/transcribe': backendUrl,

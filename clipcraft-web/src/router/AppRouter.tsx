@@ -8,7 +8,10 @@ import AuthScreen from '@/pages/AuthScreen';
 import HighlightResultScreen from '@/pages/HighlightResultScreen';
 import EditorScreen from '@/pages/EditorScreen';
 import LandingScreen from '@/pages/LandingScreen';
+import ProjectHighlightsScreen from '@/pages/ProjectHighlightsScreen';
+import ProjectRecommendScreen from '@/pages/ProjectRecommendScreen';
 import ProjectsScreen from '@/pages/ProjectsScreen';
+import UploadRecommendScreen from '@/pages/UploadRecommendScreen';
 import UploadScreen from '@/pages/UploadScreen';
 import { createProject, getProjectState } from '@/api/projects';
 import type { EditorSavedState } from '@/api/projects';
@@ -70,7 +73,7 @@ function UploadRoute() {
             // 프로젝트를 만들지 못해도 분석·편집은 할 수 있다. 다만 이번 편집은 서버에 저장되지 않는다.
           }
         }
-        navigate('/analyzing', { state: { ...result, projectId } });
+        navigate(result.mode === 'recommend' ? '/ai-scenario' : '/analyzing', { state: { ...result, projectId } });
       }}
     />
   );
@@ -100,6 +103,23 @@ function AnalyzingRoute() {
   );
 }
 
+function RecommendRoute() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const request = location.state as PendingHighlightAnalysis | null;
+
+  if (!request?.file || request.mode !== 'recommend') return <Navigate to="/upload" replace />;
+
+  return (
+    <UploadRecommendScreen
+      request={request}
+      onBack={() => backToUpload(navigate, location)}
+      onRetry={() => navigate('/ai-scenario', { replace: true, state: { ...request, attempt: (request.attempt ?? 0) + 1 } })}
+      onNext={(analysis) => navigate(editorPath(analysis.jobId), { state: analysis })}
+    />
+  );
+}
+
 function HighlightResultRoute() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -117,6 +137,7 @@ function HighlightResultRoute() {
       videoPath={videoPath || request.videoPath}
       videoUrl={request.videoUrl}
       videoName={request.videoName}
+      projectId={request.projectId}
       onBack={() => backToUpload(navigate, location)}
       onRetry={() => navigate('/analyzing', { replace: true, state: { ...request, attempt: (request.attempt ?? 0) + 1 } })}
       onNext={(analysis) => navigate(editorPath(analysis.jobId), { state: { ...analysis, projectId: request.projectId } })}
@@ -140,6 +161,8 @@ function EditorRoute() {
       videoUrl={analysisResult?.videoUrl}
       projectId={analysisResult?.projectId}
       jobId={analysisResult?.jobId}
+      onOpenHighlights={analysisResult?.projectId ? () => navigate(`/workspace/${analysisResult.projectId}/highlights`) : undefined}
+      onOpenRecommend={analysisResult?.projectId ? () => navigate(`/workspace/${analysisResult.projectId}/recommend`) : undefined}
       onBack={() => navigate(analysisResult?.projectId ? '/workspace' : '/upload')}
     />
   );
@@ -224,6 +247,8 @@ function ProjectEditorRoute() {
       jobId={analysis.jobId}
       initialEditor={editor ?? undefined}
       hasPreview={hasPreview}
+      onOpenHighlights={() => navigate(`/workspace/${projectId}/highlights`)}
+      onOpenRecommend={() => navigate(`/workspace/${projectId}/recommend`)}
       onBack={() => navigate('/workspace')}
     />
   );
@@ -282,6 +307,16 @@ export default function AppRouter() {
             >
               <RequireAuth>
                 <AnalyzingRoute />
+              </RequireAuth>
+            </motion.div>
+          }
+        />
+        <Route
+          path="/ai-scenario"
+          element={
+            <motion.div className="min-h-screen" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.3, ease: 'easeInOut' }}>
+              <RequireAuth>
+                <RecommendRoute />
               </RequireAuth>
             </motion.div>
           }
@@ -384,6 +419,26 @@ export default function AppRouter() {
             <motion.div className="min-h-screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3, ease: 'easeInOut' }}>
               <RequireAuth>
                 <ProjectEditorRoute />
+              </RequireAuth>
+            </motion.div>
+          }
+        />
+        <Route
+          path="/workspace/:projectId/highlights"
+          element={
+            <motion.div className="min-h-screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3, ease: 'easeInOut' }}>
+              <RequireAuth>
+                <ProjectHighlightsScreen />
+              </RequireAuth>
+            </motion.div>
+          }
+        />
+        <Route
+          path="/workspace/:projectId/recommend"
+          element={
+            <motion.div className="min-h-screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3, ease: 'easeInOut' }}>
+              <RequireAuth>
+                <ProjectRecommendScreen />
               </RequireAuth>
             </motion.div>
           }

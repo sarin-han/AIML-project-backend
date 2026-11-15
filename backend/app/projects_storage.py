@@ -10,6 +10,7 @@ from . import models
 from .database import DATA_DIR
 
 VIDEO_DIR = DATA_DIR / "videos"
+FRAME_DIR = DATA_DIR / "frames"
 
 
 def get_or_create_data(db: Session, project_id: str) -> models.ProjectData:
@@ -38,6 +39,7 @@ def save_project_video(db: Session, project: models.Project, filename: str | Non
         (DATA_DIR / row.video_storage_path).unlink(missing_ok=True)
 
     (DATA_DIR / relative).write_bytes(content)
+    shutil.rmtree(FRAME_DIR / project.id, ignore_errors=True)  # 새 영상이면 이전 영상에서 뽑은 미리보기는 버린다
     row.video_filename = filename or f"video{suffix}"
     row.video_content_type = content_type or "video/mp4"
     row.video_storage_path = relative
@@ -75,3 +77,29 @@ def copy_project_data(db: Session, source: models.Project, target: models.Projec
     target.status = "editing" if row.analysis else target.status
     db.add_all([copy, target])
     db.commit()
+
+
+def frame_image(project_id: str, video: Path, seconds: float, width: int) -> Path | None:
+    """영상의 한 시각을 작은 JPEG로 뽑는다. 한 번 뽑은 것은 디스크에 두고 다시 쓴다."""
+    import subprocess
+
+    seconds = round(max(0.0, seconds), 1)
+    target = FRAME_DIR / project_id / f"{seconds:.1f}_{width}.jpg"
+    if target.is_file():
+        return target
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(".tmp.jpg")
+    command = ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-ss", f"{seconds:.1f}", "-i", str(video), "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "5", str(partial)]
+    try:
+        subprocess.run(command, check=True, capture_output=True, timeout=30)
+    except (subprocess.SubprocessError, OSError):
+        partial.unlink(missing_ok=True)
+        return None
+
+    if not partial.is_file() or partial.stat().st_size == 0:
+        # 영상 길이를 넘은 시각이면 프레임이 없다.
+        partial.unlink(missing_ok=True)
+        return None
+    partial.replace(target)
+    return target

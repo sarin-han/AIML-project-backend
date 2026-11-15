@@ -15,6 +15,9 @@ export interface EditorScreenProps {
   jobId?: string;
   /** 프로젝트 목록 썸네일이 이미 있으면 true */
   hasPreview?: boolean;
+  /** 프로젝트 영상에서 시나리오를 추천받는 / 하이라이트를 추출하는 화면으로 이동 */
+  onOpenRecommend?: () => void;
+  onOpenHighlights?: () => void;
   /** 프로젝트를 다시 열 때 서버에서 불러온 편집 내용 */
   initialEditor?: EditorSavedState;
 }

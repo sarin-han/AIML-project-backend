@@ -114,8 +114,8 @@ function getThumbnailSeekTime(duration: number): number {
 }
 
 /** 영상의 중간 프레임을 목록용 작은 JPEG(data URL)로 만든다. */
-export async function captureProjectThumbnail(videoUrl: string, duration: number): Promise<string> {
-  const full = await captureVideoThumbnail(videoUrl, duration, duration / 2);
+export async function captureProjectThumbnail(videoUrl: string, duration: number, atSeconds: number = duration / 2): Promise<string> {
+  const full = await captureVideoThumbnail(videoUrl, duration, atSeconds);
 
   return new Promise((resolve, reject) => {
     const image = new Image();
