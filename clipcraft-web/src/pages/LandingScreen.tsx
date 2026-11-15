@@ -9,6 +9,7 @@ import LandingHeader from '@/components/LandingScreen/LandingHeader';
 import { CtaSection, HeroSection, LandingFooter, ProblemSection, UseCaseSection } from '@/components/LandingScreen/LandingSections';
 import { features } from '@/components/LandingScreen/landingData';
 import { cn } from '@/lib/cn';
+import { useAuth } from '@/lib/authContext';
 
 const FEATURE_NAV_REVEAL_RATIO = 0.1;
 const FEATURE_NAV_HIDE_RATIO = 0.8;
@@ -101,8 +102,10 @@ export default function LandingScreen() {
     };
   }, []);
 
-  const start = () => navigate('/upload');
-  const login = () => navigate('/login');
+  // 로그인한 사용자에게만 편집 시작 버튼을 보여 준다. 로그인하지 않았으면 로그인 버튼만 보인다.
+  const { loading, user } = useAuth();
+  const start = user ? () => navigate('/workspace') : undefined;
+  const login = !loading && !user ? () => navigate('/login') : undefined;
   const selectFeature = (featureId: string) => {
     setActiveFeature(featureId);
     document.getElementById(featureId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });

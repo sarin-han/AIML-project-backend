@@ -8,6 +8,11 @@ services:
     environment:
       GPU_SERVER_URL: ${GPU_SERVER_URL:-http://host.docker.internal:8001}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      DATABASE_URL: ${DATABASE_URL:-}
+    volumes:
+      # SQLite(DATABASE_URL 비움) 사용 시 계정·프로젝트가 재빌드 후에도 남도록 보존
+      - ./backend/data:/app/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     expose:

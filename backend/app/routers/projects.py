@@ -1,9 +1,15 @@
+import json
+import os
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+import httpx
+from fastapi import APIRouter, Depends, Header, Query
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .. import models, security
+from ..projects_storage import copy_project_data, get_or_create_data, video_file
 from ..database import get_db
 from ..envelope import ApiError, envelope, envelope_list
 from ..schemas import (
@@ -170,5 +176,160 @@ def duplicate_project(
     db.add(duplicate)
     db.commit()
     db.refresh(duplicate)
+    copy_project_data(db, project, duplicate)
+    db.refresh(duplicate)
 
     return envelope(ProjectSummary.model_validate(duplicate))
+
+
+GPU_SERVER_URL = os.environ.get("GPU_SERVER_URL", "http://host.docker.internal:8001").rstrip("/")
+MAX_STATE_BYTES = 8 * 1024 * 1024
+
+
+class ProjectStatePayload(BaseModel):
+    """프로젝트의 분석 결과와 편집 상태. 보낸 항목만 바꾼다."""
+
+    analysis: dict | None = None
+    editor: dict | None = None
+    job_id: str | None = None
+    video_path: str | None = None
+    status: str | None = None
+    exported_duration_seconds: float | None = None
+
+
+def _load_json(text: str | None):
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
+
+
+async def _ensure_gpu_copy(row: models.ProjectData, stored: "os.PathLike | None") -> str | None:
+    """분석·내보내기는 GPU 서버 임시 폴더의 사본을 쓴다. 사라졌으면 저장해 둔 영상으로 다시 올린다."""
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            if row.gpu_video_path:
+                check = await client.get(f"{GPU_SERVER_URL}/videos/exists", params={"video_path": row.gpu_video_path}, timeout=10.0)
+                if check.is_success and check.json().get("exists"):
+                    return row.gpu_video_path
+            if stored is None:
+                return row.gpu_video_path
+            with open(stored, "rb") as handle:
+                files = {"video": (row.video_filename or "video.mp4", handle, row.video_content_type or "application/octet-stream")}
+                uploaded = await client.post(f"{GPU_SERVER_URL}/videos", files=files)
+            if uploaded.is_success:
+                return uploaded.json().get("video_path")
+    except (httpx.HTTPError, ValueError):
+        pass
+    return row.gpu_video_path
+
+
+@router.get("/{project_id}/state")
+async def get_project_state(
+    project_id: str,
+    current_user: models.User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = _get_owned_project(db, current_user, project_id)
+    row = db.get(models.ProjectData, project_id)
+
+    if row is None:
+        return envelope({"project": ProjectSummary.model_validate(project), "analysis": None, "editor": None, "job_id": None, "video": None})
+
+    stored = video_file(row)
+    gpu_path = await _ensure_gpu_copy(row, stored) if row.analysis else row.gpu_video_path
+    if gpu_path != row.gpu_video_path:
+        row.gpu_video_path = gpu_path
+        db.add(row)
+        db.commit()
+
+    video = None
+    if stored is not None or gpu_path:
+        video = {
+            "name": row.video_filename,
+            "url": f"/api/v1/projects/{project_id}/video?token={security.create_video_token(current_user.id, project_id)}" if stored is not None else None,
+            "path": gpu_path,
+        }
+
+    return envelope(
+        {
+            "project": ProjectSummary.model_validate(project),
+            "analysis": _load_json(row.analysis),
+            "editor": _load_json(row.editor_state),
+            "job_id": row.job_id,
+            "video": video,
+        }
+    )
+
+
+@router.put("/{project_id}/state")
+def put_project_state(
+    project_id: str,
+    payload: ProjectStatePayload,
+    current_user: models.User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = _get_owned_project(db, current_user, project_id)
+    row = get_or_create_data(db, project_id)
+
+    if payload.analysis is not None:
+        text = json.dumps(payload.analysis, ensure_ascii=False)
+        if len(text) > MAX_STATE_BYTES:
+            raise ApiError(413, "PAYLOAD_TOO_LARGE", "분석 결과가 너무 커요.")
+        row.analysis = text
+        segments = payload.analysis.get("segments")
+        project.scene_count = len(segments) if isinstance(segments, list) else project.scene_count
+        duration = payload.analysis.get("duration")
+        if isinstance(duration, (int, float)) and duration > 0:
+            project.source_duration_seconds = float(duration)
+        if project.status in ("draft", "analyzing", "failed"):
+            project.status = "editing"
+    if payload.editor is not None:
+        text = json.dumps(payload.editor, ensure_ascii=False)
+        if len(text) > MAX_STATE_BYTES:
+            raise ApiError(413, "PAYLOAD_TOO_LARGE", "편집 내용이 너무 커요.")
+        row.editor_state = text
+    if payload.job_id is not None:
+        row.job_id = payload.job_id
+    if payload.video_path is not None:
+        row.gpu_video_path = payload.video_path
+    if payload.status in ("editing", "completed"):
+        project.status = payload.status
+    if payload.exported_duration_seconds is not None:
+        project.exported_duration_seconds = payload.exported_duration_seconds
+
+    project.updated_at = datetime.utcnow()
+    db.add_all([row, project])
+    db.commit()
+    db.refresh(project)
+
+    return envelope(ProjectSummary.model_validate(project))
+
+
+@router.get("/{project_id}/video")
+def get_project_video(
+    project_id: str,
+    token: str | None = None,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """저장해 둔 원본 영상. <video>가 쓰도록 주소의 token(영상 전용 단기 토큰)이나 Authorization 헤더로 확인한다."""
+    if token:
+        user_id = security.decode_video_token(token, project_id)
+    elif authorization and authorization.lower().startswith("bearer "):
+        user_id = security.decode_access_token(authorization.split(" ", 1)[1].strip())
+    else:
+        raise ApiError(401, "UNAUTHORIZED", "토큰이 없거나 만료되었습니다.")
+
+    project = db.get(models.Project, project_id)
+    if not project or project.user_id != user_id or project.deleted_at is not None:
+        raise ApiError(404, "RESOURCE_NOT_FOUND", "프로젝트를 찾을 수 없습니다.")
+
+    row = db.get(models.ProjectData, project_id)
+    path = video_file(row)
+    if path is None:
+        raise ApiError(404, "RESOURCE_NOT_FOUND", "저장된 영상이 없어요.")
+
+    return FileResponse(path, media_type=row.video_content_type or "video/mp4", filename=None)

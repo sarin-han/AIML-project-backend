@@ -1,4 +1,5 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
+import type { EditorSavedState } from '@/api/projects';
 import type { IconName } from '@/components/icons';
 import type { ChatMessage as AppChatMessage, EditorHighlightSegment, HighlightAnalysisData, SegmentEditSetting, SubtitleCue } from '@/types/app';
 
@@ -9,6 +10,11 @@ export interface EditorScreenProps {
   videoPath?: string;
   videoUrl?: string;
   videoName?: string;
+  /** 서버에 저장되는 프로젝트의 ID. 있으면 편집 내용을 자동 저장한다. */
+  projectId?: string;
+  jobId?: string;
+  /** 프로젝트를 다시 열 때 서버에서 불러온 편집 내용 */
+  initialEditor?: EditorSavedState;
 }
 
 export interface PlayerControlsProps {

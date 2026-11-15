@@ -1,4 +1,6 @@
 import { requestApiV1 } from '@/api/v1Client';
+import type { SubtitleSets, SubtitleStyle } from '@/lib/subtitles';
+import type { EditorHighlightSegment, HighlightAnalysisData, SegmentEditSetting } from '@/types/app';
 
 export interface ApiProject {
   id: string;
@@ -29,7 +31,7 @@ export async function listProjects(accessToken: string): Promise<ApiProject[]> {
   return data;
 }
 
-export async function createProject(accessToken: string, input: { title: string; format: string }): Promise<ApiProject> {
+export async function createProject(accessToken: string, input: { title: string; format?: string }): Promise<ApiProject> {
   const { data } = await requestApiV1<ApiProject>('/projects', { method: 'POST', body: JSON.stringify(input) }, accessToken);
   return data;
 }
@@ -58,5 +60,42 @@ export async function duplicateProject(accessToken: string, projectId: string, t
     { method: 'POST', body: JSON.stringify(title ? { title } : {}) },
     accessToken,
   );
+  return data;
+}
+
+/** 편집 화면에서 저장·복원하는 편집 내용 (되돌리기 대상과 같다) */
+export interface EditorSavedState {
+  deletedSegmentIds: number[];
+  extraSegments: EditorHighlightSegment[];
+  segmentEditSettings: SegmentEditSetting[];
+  segments: EditorHighlightSegment[];
+  subtitleSets: SubtitleSets;
+  subtitleStyle: SubtitleStyle;
+}
+
+export interface ProjectState {
+  project: ApiProject;
+  analysis: HighlightAnalysisData | null;
+  editor: EditorSavedState | null;
+  job_id: string | null;
+  video: { name: string | null; url: string | null; path: string | null } | null;
+}
+
+export interface ProjectStateInput {
+  analysis?: HighlightAnalysisData;
+  editor?: EditorSavedState;
+  job_id?: string;
+  video_path?: string;
+  status?: 'editing' | 'completed';
+  exported_duration_seconds?: number;
+}
+
+export async function getProjectState(accessToken: string, projectId: string): Promise<ProjectState> {
+  const { data } = await requestApiV1<ProjectState>(`/projects/${projectId}/state`, {}, accessToken);
+  return data;
+}
+
+export async function saveProjectState(accessToken: string, projectId: string, input: ProjectStateInput): Promise<ApiProject> {
+  const { data } = await requestApiV1<ApiProject>(`/projects/${projectId}/state`, { method: 'PUT', body: JSON.stringify(input) }, accessToken);
   return data;
 }

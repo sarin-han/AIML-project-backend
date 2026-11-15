@@ -3,6 +3,8 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { downloadExportedVideo, requestExportVideo } from '@/api/export';
 import { ApiError } from '@/api/client';
 import { requestChatEdit } from '@/api/chatEdit';
+import { saveProjectState } from '@/api/projects';
+import { useAuth } from '@/lib/authContext';
 import { requestSubtitleSuggestions } from '@/api/suggest';
 import { requestTranslations, translateCuesToKorean } from '@/api/translate';
 import { findScenarios } from '@/api/scenarios';
@@ -218,11 +220,14 @@ function snapshotsDiffer(a: EditSnapshot, b: EditSnapshot): boolean {
   return (Object.keys(a) as Array<keyof EditSnapshot>).some((key) => a[key] !== b[key]);
 }
 
-export default function EditorWorkspace({ analysis, onBack, projectName, videoPath, videoName, videoUrl }: EditorScreenProps) {
+export default function EditorWorkspace({ analysis, onBack, projectName, videoPath, videoName, videoUrl, projectId, jobId, initialEditor }: EditorScreenProps) {
   const { accent } = useTheme();
-  const [deletedSegmentIds, setDeletedSegmentIds] = useState<number[]>(loadDeletedSegmentIds);
-  const [extraSegments, setExtraSegments] = useState<EditorHighlightSegment[]>([]);
-  const [segments, setSegments] = useState<EditorHighlightSegment[]>(() => filterDeletedSegments(analysis?.segments ?? [], loadDeletedSegmentIds()));
+  const { accessToken } = useAuth();
+  // 서버 프로젝트의 편집이면 브라우저 저장값(모든 프로젝트가 같이 쓰는 키) 대신 서버에 저장된 내용으로 시작한다.
+  const storedDeletedIds = projectId ? [] : loadDeletedSegmentIds();
+  const [deletedSegmentIds, setDeletedSegmentIds] = useState<number[]>(() => initialEditor?.deletedSegmentIds ?? storedDeletedIds);
+  const [extraSegments, setExtraSegments] = useState<EditorHighlightSegment[]>(() => initialEditor?.extraSegments ?? []);
+  const [segments, setSegments] = useState<EditorHighlightSegment[]>(() => initialEditor?.segments ?? filterDeletedSegments(analysis?.segments ?? [], storedDeletedIds));
   const duration = analysis?.duration && analysis.duration > 0 ? analysis.duration : 15 * 60;
   const waveHeights = amplitudesToWaveHeights(analysis?.amplitudes ?? []);
   const [playing, setPlaying] = useState(false);
@@ -234,10 +239,10 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
   const [dragging, setDragging] = useState(false);
   const [muted, setMuted] = useState(false);
   const [segmentEditSettings, setSegmentEditSettings] = useState<SegmentEditSetting[]>(() =>
-    filterStoredEditSettings(loadSegmentEditSettings(), analysis?.segments ?? [], loadDeletedSegmentIds()),
+    initialEditor?.segmentEditSettings ?? filterStoredEditSettings(projectId ? [] : loadSegmentEditSettings(), analysis?.segments ?? [], storedDeletedIds),
   );
   const [segmentThumbnails, setSegmentThumbnails] = useState<Record<number, string>>({});
-  const [subtitleSets, setSubtitleSets] = useState<SubtitleSets>(() => loadSubtitleSets(videoPath));
+  const [subtitleSets, setSubtitleSets] = useState<SubtitleSets>(() => initialEditor?.subtitleSets ?? (projectId ? { voice: [], scenario: [], active: 'voice' } : loadSubtitleSets(videoPath)));
   // 지금 보이는(편집·내보내기 대상) 자막은 active인 쪽이다.
   const subtitles = subtitleSets[subtitleSets.active];
   const setSubtitles = (update: SubtitleCue[] | ((current: SubtitleCue[]) => SubtitleCue[])) =>
@@ -253,7 +258,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
   const [subtitleProgress, setSubtitleProgress] = useState(0);
   const [subtitleLanguage, setSubtitleLanguage] = useState('');
   const [subtitleTranslate, setSubtitleTranslate] = useState(true);
-  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(loadSubtitleStyle);
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() => initialEditor?.subtitleStyle ?? loadSubtitleStyle());
   const [tab, setTab] = useState<'scenes' | 'subs'>('scenes');
   const [subtitleTrackOpen, setSubtitleTrackOpen] = useState(false);
   const [panelWidth, setPanelWidth] = useState(loadPanelWidth);
@@ -270,7 +275,8 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
   const scrubberRef = useRef<HTMLDivElement>(null);
   const exportToastTimerRef = useRef<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const skipSegmentSyncRef = useRef(false);
+  // 저장된 편집으로 열었을 때는 처음 한 번 분석 결과로 구간을 다시 만들지 않는다(저장된 구간을 그대로 쓴다).
+  const skipSegmentSyncRef = useRef(Boolean(initialEditor));
   const historyRef = useRef<{ applying: boolean; future: EditSnapshot[]; lastChange: number; mountedAt: number; past: EditSnapshot[]; present: EditSnapshot | null }>({
     applying: false,
     future: [],
@@ -783,6 +789,27 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     }, 3200);
   };
 
+  // 서버 프로젝트의 편집 내용을 잠깐 모아서 저장한다. 저장된 내용으로 막 열었을 때는 바뀐 게 없으므로 첫 실행은 건너뛴다.
+  const skipFirstSaveRef = useRef(Boolean(initialEditor));
+  useEffect(() => {
+    if (!projectId || !accessToken) return;
+    if (skipFirstSaveRef.current) {
+      skipFirstSaveRef.current = false;
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      saveProjectState(accessToken, projectId, {
+        analysis: { segments: analysis?.segments ?? [], duration: analysis?.duration ?? 0, barCount: analysis?.barCount ?? 0, amplitudes: analysis?.amplitudes ?? [] },
+        editor: { deletedSegmentIds, extraSegments, segmentEditSettings, segments, subtitleSets, subtitleStyle },
+        job_id: jobId,
+        video_path: videoPath,
+      }).catch((error) => console.error('프로젝트 저장 실패', error));
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [projectId, accessToken, analysis, jobId, videoPath, deletedSegmentIds, extraSegments, segmentEditSettings, segments, subtitleSets, subtitleStyle]);
+
   // 편집 상태가 바뀔 때마다 이전 상태를 기록한다.
   useEffect(() => {
     const history = historyRef.current;
@@ -889,6 +916,10 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
       const subtitleCues = exportWithSubtitles ? mapCuesToTimeline(subtitles, segments, segmentEditSettings, subtitleStyle.bilingual, subtitleStyle.showExtra) : [];
       const blob = await requestExportVideo(videoPath, segments, segmentEditSettings, subtitleCues.length > 0 ? { cues: subtitleCues, style: subtitleStyle } : undefined, undefined, setExportProgress);
       downloadExportedVideo(blob);
+      if (projectId && accessToken) {
+        const exportedSeconds = segments.reduce((total, segment) => total + Math.max(0, segment.end - segment.start) / (segmentEditSettings.find((item) => item.segmentId === segment.id)?.speed || 1), 0);
+        saveProjectState(accessToken, projectId, { status: 'completed', exported_duration_seconds: Math.round(exportedSeconds * 10) / 10 }).catch(() => undefined);
+      }
       setExportState('done');
       showExportToast('내보내기가 완료됐어요');
       window.setTimeout(() => setExportState('idle'), 1800);

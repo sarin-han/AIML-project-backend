@@ -58,6 +58,7 @@ function getAnalyzeRequestKey(request: PendingHighlightAnalysis): string {
     fileSize: request.file.size,
     fileLastModified: request.file.lastModified,
     projectName: request.projectName,
+    projectId: request.projectId,
     // 추천으로 받은 구간이 달라지면 다른 요청이다.
     scenarios: request.scenarios.map((scenario) => [scenario.ko, scenario.rec ? scenario.start : null, scenario.rec ? scenario.end : null]),
   });
@@ -70,7 +71,7 @@ function getOrStartAnalyzeJob(requestKey: string, request: PendingHighlightAnaly
   const cachedStartPromise = analyzeJobStartPromisesByRequest.get(requestKey);
   if (cachedStartPromise) return cachedStartPromise;
 
-  const start = request.mode === 'highlight' ? startHighlightJob(request.file, request.projectName) : startAnalyzeJob(request.file, request.scenarios, request.projectName);
+  const start = request.mode === 'highlight' ? startHighlightJob(request.file, request.projectName, request.projectId) : startAnalyzeJob(request.file, request.scenarios, request.projectName, request.projectId);
   const startPromise = start
     .then((job) => {
       analyzeJobIdsByRequest.set(requestKey, job.job_id);
@@ -140,6 +141,7 @@ export default function AnalyzingScreen({ request, onDone, onHighlightDone, onBa
               onDoneRef.current({
                 ...normalizeAnalyzeResponse(job.results),
                 jobId,
+                projectId: request.projectId,
                 projectName: job.project,
                 videoPath: job.video_path ?? request.videoPath,
                 videoUrl: request.videoUrl,

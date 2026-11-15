@@ -2,15 +2,18 @@ import json
 import os
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from app.database import init_db
+from app import models, security
+from app.database import get_db, init_db
 from app.envelope import register_error_handlers
 from app.routers import auth as auth_router
 from app.routers import projects as projects_router
+from app.projects_storage import save_project_video
+from sqlalchemy.orm import Session
 from edit_agent import make_graph, run_edit
 
 
@@ -61,11 +64,16 @@ async def start_analyze_job(
     project_name: str = Form(...),
     scenarios: str = Form(...),
     known_segments: str | None = Form(None),
+    project_id: str | None = Form(None),
+    current_user: models.User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
 ):
+    content = await video.read()
+    store_project_video(db, current_user, project_id, video, content)
     files = {
         "video": (
             video.filename or "video.mp4",
-            await video.read(),
+            content,
             video.content_type or "application/octet-stream",
         )
     }
@@ -102,7 +110,7 @@ async def start_analyze_job(
     return response.json()
 
 
-@app.get("/analyze/jobs/{job_id}")
+@app.get("/analyze/jobs/{job_id}", dependencies=[Depends(security.get_current_user)])
 async def get_analyze_job(job_id: str):
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(f"{GPU_SERVER_URL}/analyze/jobs/{job_id}")
@@ -120,13 +128,23 @@ async def project_title_en(project_name: str | None) -> str | None:
     return translated[0] if translated else None
 
 
+def store_project_video(db: Session, user: models.User, project_id: str | None, video: UploadFile, content: bytes) -> None:
+    """분석하려고 올린 영상을 프로젝트에 저장해 두어, 나중에 프로젝트를 열 때 다시 올리지 않게 한다."""
+    if not project_id:
+        return
+    project = db.get(models.Project, project_id)
+    if not project or project.user_id != user.id or project.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없어요.")
+    save_project_video(db, project, video.filename, video.content_type, content)
+
+
 async def forward_video(path: str, video: UploadFile, data: dict) -> httpx.Response:
     files = {"video": (video.filename or "video.mp4", await video.read(), video.content_type or "application/octet-stream")}
     async with httpx.AsyncClient(timeout=None) as client:
         return await client.post(f"{GPU_SERVER_URL}{path}", files=files, data=data)
 
 
-@app.post("/recommend")
+@app.post("/recommend", dependencies=[Depends(security.get_current_user)])
 async def recommend_scenes(video: UploadFile = File(...), project_name: str | None = Form(None)):
     """영상을 보고 찾아볼 만한 장면을 추천한다. 검색은 하지 않는다."""
     data = {}
@@ -139,18 +157,27 @@ async def recommend_scenes(video: UploadFile = File(...), project_name: str | No
 
 
 @app.post("/highlights/jobs")
-async def start_highlight_job(video: UploadFile = File(...), project_name: str = Form(...)):
+async def start_highlight_job(
+    video: UploadFile = File(...),
+    project_name: str = Form(...),
+    project_id: str | None = Form(None),
+    current_user: models.User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+):
     """시나리오 없이 영상 전체 길이에서 하이라이트 구간을 찾는 작업을 시작한다."""
     data = {"project_name": project_name}
     if title_en := await project_title_en(project_name):
         data["title_en"] = title_en
 
+    content = await video.read()
+    store_project_video(db, current_user, project_id, video, content)
+    await video.seek(0)
     response = await forward_video("/highlights/jobs", video, data)
     raise_upstream_error(response)
     return response.json()
 
 
-@app.get("/highlights/jobs/{job_id}")
+@app.get("/highlights/jobs/{job_id}", dependencies=[Depends(security.get_current_user)])
 async def get_highlight_job(job_id: str):
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(f"{GPU_SERVER_URL}/highlights/jobs/{job_id}")
@@ -164,7 +191,7 @@ class ScenarioFindBody(BaseModel):
     scenarios: list[str]
 
 
-@app.post("/analyze/scenarios")
+@app.post("/analyze/scenarios", dependencies=[Depends(security.get_current_user)])
 async def find_scenarios(body: ScenarioFindBody):
     """편집 화면에서 시나리오를 더 추가할 때: 이미 올라간 영상에서 새 장면만 찾는다."""
     data: dict = {"video_path": body.video_path, "scenarios": body.scenarios}
@@ -178,7 +205,7 @@ async def find_scenarios(body: ScenarioFindBody):
     return response.json()
 
 
-@app.post("/analyze")
+@app.post("/analyze", dependencies=[Depends(security.get_current_user)])
 async def analyze(request: Request):
     async with httpx.AsyncClient(timeout=None) as client:
         response = await client.post(
@@ -191,7 +218,7 @@ async def analyze(request: Request):
     return response.json()
 
 
-@app.post("/transcribe/jobs")
+@app.post("/transcribe/jobs", dependencies=[Depends(security.get_current_user)])
 async def start_transcribe_job(request: Request):
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
@@ -204,7 +231,7 @@ async def start_transcribe_job(request: Request):
     return response.json()
 
 
-@app.get("/transcribe/jobs/{job_id}")
+@app.get("/transcribe/jobs/{job_id}", dependencies=[Depends(security.get_current_user)])
 async def get_transcribe_job(job_id: str):
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(f"{GPU_SERVER_URL}/transcribe/jobs/{job_id}")
@@ -308,7 +335,7 @@ async def scenarios_to_english(scenarios: list[str]) -> list[str] | None:
     return [q.strip() for q in queries]
 
 
-@app.post("/translate")
+@app.post("/translate", dependencies=[Depends(security.get_current_user)])
 async def translate_to_korean(request: TranslateRequest):
     if not OPENAI_API_KEY:
         raise HTTPException(status_code=503, detail="OPENAI_API_KEY가 설정되지 않아 번역할 수 없습니다.")
@@ -404,7 +431,7 @@ async def suggest_batch(client: httpx.AsyncClient, items: list[SuggestItem], bas
         raise HTTPException(status_code=502, detail="자막 추천 응답을 해석하지 못했습니다.")
 
 
-@app.post("/suggest-subtitles")
+@app.post("/suggest-subtitles", dependencies=[Depends(security.get_current_user)])
 async def suggest_subtitles(request: SuggestRequest):
     if not OPENAI_API_KEY:
         raise HTTPException(status_code=503, detail="OPENAI_API_KEY가 설정되지 않아 자막을 추천할 수 없습니다.")
@@ -430,7 +457,7 @@ async def suggest_subtitles(request: SuggestRequest):
     return {"suggestions": [{"id": item.id, "text": suggestions[item.id]} for item in usable if suggestions.get(item.id)]}
 
 
-@app.post("/export")
+@app.post("/export", dependencies=[Depends(security.get_current_user)])
 async def export_video(request: Request):
     async with httpx.AsyncClient(timeout=None) as client:
         response = await client.post(
@@ -451,7 +478,7 @@ async def export_video(request: Request):
     )
 
 
-@app.post("/export/jobs")
+@app.post("/export/jobs", dependencies=[Depends(security.get_current_user)])
 async def start_export_job(request: Request):
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
@@ -464,7 +491,7 @@ async def start_export_job(request: Request):
     return response.json()
 
 
-@app.get("/export/jobs/{job_id}")
+@app.get("/export/jobs/{job_id}", dependencies=[Depends(security.get_current_user)])
 async def get_export_job(job_id: str):
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(f"{GPU_SERVER_URL}/export/jobs/{job_id}")
@@ -473,7 +500,7 @@ async def get_export_job(job_id: str):
     return response.json()
 
 
-@app.get("/export/jobs/{job_id}/download")
+@app.get("/export/jobs/{job_id}/download", dependencies=[Depends(security.get_current_user)])
 async def download_export_job(job_id: str):
     # 결과 영상은 크기가 커서 한꺼번에 메모리에 올리지 않고 받는 대로 흘려 보낸다.
     client = httpx.AsyncClient(timeout=None)
@@ -523,7 +550,7 @@ class ChatEditRequest(BaseModel):
 _edit_graph = None
 
 
-@app.post("/chat/edit")
+@app.post("/chat/edit", dependencies=[Depends(security.get_current_user)])
 async def chat_edit(request: ChatEditRequest):
     global _edit_graph
     if not OPENAI_API_KEY:
@@ -546,7 +573,7 @@ STT_MODEL = os.environ.get("STT_MODEL", "whisper-1")
 STT_MAX_BYTES = 10 * 1024 * 1024
 
 
-@app.post("/chat/transcribe")
+@app.post("/chat/transcribe", dependencies=[Depends(security.get_current_user)])
 async def chat_transcribe(audio: UploadFile = File(...), language: str = Form("ko")):
     """채팅 편집용 음성 -> 글자. 브라우저 녹음(Chrome webm, Safari mp4)을 그대로 Whisper에 보낸다."""
     if not OPENAI_API_KEY:

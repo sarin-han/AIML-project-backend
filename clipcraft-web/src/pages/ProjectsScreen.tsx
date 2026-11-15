@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createProject as createProjectRequest, deleteProject as deleteProjectRequest, duplicateProject as duplicateProjectRequest, listProjects, patchProject, restoreProject as restoreProjectRequest } from '@/api/projects';
+import { deleteProject as deleteProjectRequest, duplicateProject as duplicateProjectRequest, listProjects, patchProject, restoreProject as restoreProjectRequest } from '@/api/projects';
 import DeleteProjectModal from '@/components/ProjectsScreen/DeleteProjectModal';
 import EmptySearchState from '@/components/ProjectsScreen/EmptySearchState';
 import NewProjectCard from '@/components/ProjectsScreen/NewProjectCard';
-import NewProjectModal from '@/components/ProjectsScreen/NewProjectModal';
 import ProjectCard from '@/components/ProjectsScreen/ProjectCard';
 import ProjectRow, { ProjectListHeader } from '@/components/ProjectsScreen/ProjectRow';
 import ProjectsPageHeader from '@/components/ProjectsScreen/ProjectsPageHeader';
@@ -17,10 +16,11 @@ import type { ProjectItem, ProjectSort, ProjectsView, ToastState } from '@/types
 
 interface ProjectsScreenProps {
   onLogoClick: () => void;
-  onStartNewProject: (project?: { format?: string; projectName?: string }) => void;
+  onStartNewProject: (project?: { projectName?: string; projectId?: string }) => void;
+  onOpenProject: (projectId: string) => void;
 }
 
-export default function ProjectsScreen({ onLogoClick, onStartNewProject }: ProjectsScreenProps) {
+export default function ProjectsScreen({ onLogoClick, onStartNewProject, onOpenProject }: ProjectsScreenProps) {
   const { accessToken } = useAuth();
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -29,7 +29,6 @@ export default function ProjectsScreen({ onLogoClick, onStartNewProject }: Proje
   const [sort, setSort] = useState<ProjectSort>('updated');
   const [deleteTarget, setDeleteTarget] = useState<ProjectItem | null>(null);
   const [renameTarget, setRenameTarget] = useState<ProjectItem | null>(null);
-  const [newOpen, setNewOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const undoRef = useRef<{ index: number; project: ProjectItem } | null>(null);
 
@@ -63,20 +62,14 @@ export default function ProjectsScreen({ onLogoClick, onStartNewProject }: Proje
   }, [projects, query, sort]);
 
   const openProject = (project: ProjectItem) => {
-    if (project.status === 'draft') {
-      onStartNewProject({ format: project.format, projectName: project.title });
+    // 분석이 끝난 프로젝트(편집 중·완료)는 저장된 영상·분석 결과·편집 내용으로 편집 화면을 되살린다.
+    if (project.status === 'editing' || project.status === 'completed') {
+      onOpenProject(project.id);
       return;
     }
 
-    setToast({
-      icon: project.status === 'analyzing' ? 'clock' : project.status === 'failed' ? 'trash' : 'check',
-      message:
-        project.status === 'analyzing'
-          ? `"${project.title}" 열기는 분석 완료 후 가능해요`
-          : project.status === 'failed'
-            ? `"${project.title}" 프로젝트는 다시 생성이 필요해요`
-            : `"${project.title}" 샘플 프로젝트를 선택했어요`,
-    });
+    // 초안·분석 중·실패는 아직 저장된 분석 결과가 없으므로 업로드부터 다시 시작한다(같은 프로젝트에 이어서 저장된다).
+    onStartNewProject({ projectName: project.title, projectId: project.id });
   };
 
   const deleteProject = async (project: ProjectItem) => {
@@ -156,19 +149,8 @@ export default function ProjectsScreen({ onLogoClick, onStartNewProject }: Proje
     }
   };
 
-  const createProject = async ({ format, name }: { format: string; name: string }) => {
-    if (!accessToken) return;
-
-    try {
-      const created = await createProjectRequest(accessToken, { title: name, format });
-      setProjects((current) => [toProjectItem(created), ...current]);
-      setNewOpen(false);
-      onStartNewProject({ format, projectName: name });
-      setToast({ icon: 'check', message: '프로젝트가 생성됐어요. 영상을 업로드해보세요!' });
-    } catch {
-      setToast({ icon: 'trash', message: '프로젝트 생성에 실패했어요.' });
-    }
-  };
+  // 새 프로젝트는 업로드 화면에서 제목을 입력하고 분석을 시작할 때 만들어진다.
+  const startNewProject = () => onStartNewProject();
 
   const actionHandlers = {
     onDelete: setDeleteTarget,
@@ -182,14 +164,14 @@ export default function ProjectsScreen({ onLogoClick, onStartNewProject }: Proje
     <div className="flex min-h-screen flex-col bg-[#fafafa]">
       <ProjectsTopNav onLogoClick={onLogoClick} />
       <main className="mx-auto w-full max-w-[1440px] flex-1 px-10 pt-9 pb-20 max-[760px]:px-5">
-        <ProjectsPageHeader count={projects.length} onNewProject={() => setNewOpen(true)} />
+        <ProjectsPageHeader count={projects.length} onNewProject={() => startNewProject()} />
         <ProjectsToolbar onQueryChange={setQuery} onSortChange={setSort} onViewChange={setView} query={query} sort={sort} view={view} />
 
         {loaded && filteredProjects.length === 0 && query ? (
           <EmptySearchState onClear={() => setQuery('')} query={query} />
         ) : view === 'grid' ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
-            <NewProjectCard onClick={() => setNewOpen(true)} />
+            <NewProjectCard onClick={() => startNewProject()} />
             {filteredProjects.map((project) => (
               <ProjectCard key={project.id} project={project} {...actionHandlers} />
             ))}
@@ -206,7 +188,6 @@ export default function ProjectsScreen({ onLogoClick, onStartNewProject }: Proje
 
       {deleteTarget && <DeleteProjectModal onCancel={() => setDeleteTarget(null)} onConfirm={(project) => void deleteProject(project)} project={deleteTarget} />}
       {renameTarget && <RenameProjectModal onCancel={() => setRenameTarget(null)} onRename={(project, title) => void renameProject(project, title)} project={renameTarget} />}
-      {newOpen && <NewProjectModal onCancel={() => setNewOpen(false)} onCreate={(input) => void createProject(input)} />}
       <Toast onDismiss={() => setToast(null)} toast={toast} />
     </div>
   );

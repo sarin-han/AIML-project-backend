@@ -12,7 +12,7 @@ import { captureVideoThumbnail, formatDuration, formatFileSize, isVideoFile, loa
 import { useUploadSession } from '@/state/UploadSession';
 import type { UploadScreenProps, UploadStatus } from '@/types/pages/UploadScreen';
 
-export default function UploadFlow({ initialProjectFormat, initialProjectName, onLogoClick, onNext }: UploadScreenProps) {
+export default function UploadFlow({ initialProjectName, onBack, onNext }: UploadScreenProps) {
   const { accent, density } = useTheme();
   const fileInputId = useId();
   const shouldReduceMotion = useReducedMotion();
@@ -20,7 +20,12 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
   const accentTint = `${accent}18`;
 
   // 올린 영상·고른 방법·입력한 장면은 화면 밖에 있어서 다른 화면에 다녀와도 남는다.
-  const { uploadedVideo, setUploadedVideo, method, setMethod, items, setItems } = useUploadSession();
+  const { uploadedVideo, setUploadedVideo, method, setMethod, items, setItems, projectTitle, setProjectTitle } = useUploadSession();
+  // 프로젝트 목록에서 이어 연 프로젝트면 그 이름으로 채워 둔다.
+  useEffect(() => {
+    if (initialProjectName?.trim()) setProjectTitle(initialProjectName.trim());
+  }, [initialProjectName, setProjectTitle]);
+  const trimmedTitle = projectTitle.trim();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(uploadedVideo?.file ?? null);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>(uploadedVideo ? 'success' : 'idle');
@@ -56,8 +61,7 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
   const useEmptyStateDesign = !hasUploadedVideo;
   const isHighlightMethod = method === 'highlight';
   const hasScenario = items.length > 0;
-  const canStart = hasUploadedVideo && (isHighlightMethod || hasScenario);
-  const projectTitle = initialProjectName?.trim() || '영상 편집 시작하기';
+  const canStart = hasUploadedVideo && trimmedTitle.length > 0 && (isHighlightMethod || hasScenario);
 
   const triggerUploadError = (message: string) => {
     setUploadError(message);
@@ -104,7 +108,7 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
     if (!uploadedVideo || !canStart) return;
     onNext({
       file: uploadedVideo.file,
-      projectName: initialProjectName?.trim() || uploadedVideo.fileName.replace(/\.[^/.]+$/, '') || uploadedVideo.fileName,
+      projectName: trimmedTitle,
       mode: isHighlightMethod ? 'highlight' : 'scenario',
       scenarios: isHighlightMethod ? [] : items,
       videoPath: '',
@@ -116,8 +120,12 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
 
   const ctaLabel = isHighlightMethod ? '하이라이트 추출하기' : `시나리오로 장면 찾기${items.length ? ` · ${items.length}개` : ''}`;
   const checklist: [string, boolean][] = isHighlightMethod
-    ? [['영상 업로드', hasUploadedVideo]]
+    ? [
+        ['프로젝트 제목', trimmedTitle.length > 0],
+        ['영상 업로드', hasUploadedVideo],
+      ]
     : [
+        ['프로젝트 제목', trimmedTitle.length > 0],
         ['영상 업로드', hasUploadedVideo],
         ['장면 1개 이상', hasScenario],
       ];
@@ -129,7 +137,7 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
       initial={shouldReduceMotion ? false : 'hidden'}
       animate={shouldReduceMotion ? undefined : 'visible'}
     >
-      <UploadHeader projectFormat={initialProjectFormat} projectName={projectTitle} onLogoClick={onLogoClick} useEmptyStateDesign={useEmptyStateDesign} />
+      <UploadHeader onBack={onBack} projectTitle={projectTitle} onProjectTitleChange={setProjectTitle} useEmptyStateDesign={useEmptyStateDesign} />
 
       <StepIndicator />
 
@@ -158,7 +166,7 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
           onItemsChange={setItems}
           videoFile={hasUploadedVideo ? uploadedVideo.file : null}
           videoDurationLabel={hasUploadedVideo ? uploadedVideo.durationLabel : undefined}
-          projectName={initialProjectName?.trim() || undefined}
+          projectName={trimmedTitle || undefined}
         />
       </motion.div>
 

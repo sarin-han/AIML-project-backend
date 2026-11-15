@@ -1,4 +1,4 @@
-import { ApiError, getApiUrl, requestJson } from '@/api/client';
+import { ApiError, getApiUrl, requestJson, authFetch, errorMessageFromBody } from '@/api/client';
 import type { HighlightCandidate, HighlightExtractionResult } from '@/types/app';
 
 const DEFAULT_HIGHLIGHT_API_URL = '/highlights';
@@ -61,10 +61,11 @@ export function normalizeHighlightResult(result: NonNullable<HighlightJobStatus[
 }
 
 /** 시나리오 없이 영상 전체 길이를 분석하는 작업을 시작한다. */
-export async function startHighlightJob(file: File, projectName: string): Promise<HighlightJobStartResponse> {
+export async function startHighlightJob(file: File, projectName: string, projectId?: string): Promise<HighlightJobStartResponse> {
   const formData = new FormData();
   formData.append('video', file, file.name);
   formData.append('project_name', projectName);
+  if (projectId) formData.append('project_id', projectId);
 
   return requestJson<HighlightJobStartResponse>(`${getHighlightEndpoint()}/jobs`, {
     method: 'POST',
@@ -73,12 +74,12 @@ export async function startHighlightJob(file: File, projectName: string): Promis
 }
 
 export async function getHighlightJob(jobId: string): Promise<HighlightJobStatus> {
-  const response = await fetch(`${getHighlightEndpoint()}/jobs/${jobId}`);
+  const response = await authFetch(`${getHighlightEndpoint()}/jobs/${jobId}`);
   const contentType = response.headers.get('content-type') ?? '';
   const body = contentType.includes('application/json') ? await response.json() : null;
 
   if (!response.ok) {
-    throw new ApiError(body?.message || body?.detail || body?.error || `API request failed: ${response.status}`, response.status);
+    throw new ApiError(errorMessageFromBody(body, `API request failed: ${response.status}`), response.status);
   }
 
   return body as HighlightJobStatus;

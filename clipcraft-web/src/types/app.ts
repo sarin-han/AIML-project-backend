@@ -80,6 +80,8 @@ export interface HighlightAnalysisData {
 export interface HighlightAnalysisResult extends HighlightAnalysisData {
   /** 분석을 돌린 서버 작업 ID. 편집 화면 주소(/editor/:jobId)에 쓴다. */
   jobId?: string;
+  /** 이 편집이 속한 서버 프로젝트 ID. 있으면 편집 내용을 서버에 저장한다. */
+  projectId?: string;
   projectName?: string;
   videoPath?: string;
   videoUrl?: string;
@@ -89,6 +91,8 @@ export interface HighlightAnalysisResult extends HighlightAnalysisData {
 export interface PendingHighlightAnalysis {
   file: File;
   projectName: string;
+  /** 업로드한 영상을 붙일 서버 프로젝트 ID */
+  projectId?: string;
   /** 기본값은 'scenario'. 'highlight'이면 scenarios는 비어 있다. */
   mode?: AnalysisMode;
   /** "다시 추출"처럼 같은 요청을 새 작업으로 다시 돌릴 때 올린다. */

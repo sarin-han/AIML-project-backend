@@ -1,4 +1,4 @@
-import { ApiError, getApiUrl, requestJson } from '@/api/client';
+import { ApiError, getApiUrl, requestJson, authFetch, errorMessageFromBody } from '@/api/client';
 import type { HighlightAnalysisData, ScenarioItem } from '@/types/app';
 
 const DEFAULT_ANALYZE_API_URL = '/analyze';
@@ -71,13 +71,14 @@ export function normalizeAnalyzeResponse(items: AnalyzeResultItem[]): HighlightA
 }
 
 
-export async function startAnalyzeJob(file: File, scenarios: ScenarioItem[], projectName?: string): Promise<AnalyzeJobStartResponse> {
+export async function startAnalyzeJob(file: File, scenarios: ScenarioItem[], projectName?: string, projectId?: string): Promise<AnalyzeJobStartResponse> {
   const endpoint = `${getAnalyzeEndpoint()}/jobs`;
 
   const formData = new FormData();
   formData.append('video', file, file.name);
   formData.append('project_name', buildProjectName(file, projectName));
   formData.append('scenarios', JSON.stringify(scenarios.map((item) => item.ko)));
+  if (projectId) formData.append('project_id', projectId);
 
   // 추천으로 받은 장면은 구간을 이미 알고 있으니 서버가 다시 찾지 않게 시간을 같이 보낸다.
   const known = scenarios.map((item) => (item.rec && item.start !== undefined && item.end !== undefined ? { start: item.start, end: item.end } : null));
@@ -90,12 +91,12 @@ export async function startAnalyzeJob(file: File, scenarios: ScenarioItem[], pro
 }
 
 export async function getAnalyzeJob(jobId: string): Promise<AnalyzeJobStatus> {
-  const response = await fetch(`${getAnalyzeEndpoint()}/jobs/${jobId}`);
+  const response = await authFetch(`${getAnalyzeEndpoint()}/jobs/${jobId}`);
   const contentType = response.headers.get('content-type') ?? '';
   const body = contentType.includes('application/json') ? await response.json() : null;
 
   if (!response.ok) {
-    throw new ApiError(body?.message || body?.detail || body?.error || `API request failed: ${response.status}`, response.status);
+    throw new ApiError(errorMessageFromBody(body, `API request failed: ${response.status}`), response.status);
   }
 
   return body as AnalyzeJobStatus;

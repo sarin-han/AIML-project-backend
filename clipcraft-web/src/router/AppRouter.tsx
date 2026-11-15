@@ -1,6 +1,7 @@
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { Location, NavigateFunction } from 'react-router-dom';
 import AnalyzingScreen from '@/pages/AnalyzingScreen';
 import AuthScreen from '@/pages/AuthScreen';
@@ -9,6 +10,8 @@ import EditorScreen from '@/pages/EditorScreen';
 import LandingScreen from '@/pages/LandingScreen';
 import ProjectsScreen from '@/pages/ProjectsScreen';
 import UploadScreen from '@/pages/UploadScreen';
+import { createProject, getProjectState } from '@/api/projects';
+import type { EditorSavedState } from '@/api/projects';
 import { pageTransition } from '@/lib/animations';
 import { useAuth } from '@/lib/authContext';
 import { UploadSessionProvider } from '@/state/UploadSession';
@@ -50,14 +53,25 @@ function backToUpload(navigate: NavigateFunction, location: Location) {
 function UploadRoute() {
   const location = useLocation();
   const navigate = useNavigate();
-  const routeState = location.state as { format?: string; projectName?: string } | null;
+  const { accessToken } = useAuth();
+  const routeState = location.state as { projectName?: string; projectId?: string } | null;
 
   return (
     <UploadScreen
-      initialProjectFormat={routeState?.format}
       initialProjectName={routeState?.projectName}
-      onLogoClick={() => navigate('/')}
-      onNext={(result) => navigate('/analyzing', { state: result })}
+      onBack={() => navigate('/workspace')}
+      onNext={async (result) => {
+        // 프로젝트 화면을 거치지 않고 올렸으면 여기서 프로젝트를 만들어, 영상과 편집 내용을 저장할 곳을 마련한다.
+        let projectId = routeState?.projectId;
+        if (!projectId && accessToken) {
+          try {
+            projectId = (await createProject(accessToken, { title: result.projectName })).id;
+          } catch {
+            // 프로젝트를 만들지 못해도 분석·편집은 할 수 있다. 다만 이번 편집은 서버에 저장되지 않는다.
+          }
+        }
+        navigate('/analyzing', { state: { ...result, projectId } });
+      }}
     />
   );
 }
@@ -74,7 +88,7 @@ function AnalyzingRoute() {
   return (
     <AnalyzingScreen
       request={pendingAnalysis}
-      onDone={(result) => navigate(editorPath(result.jobId), { state: result })}
+      onDone={(result) => navigate(editorPath(result.jobId), { state: { ...result, projectId: pendingAnalysis.projectId } })}
       onHighlightDone={(result) => {
         const { jobId, projectName, videoPath, ...extraction } = result;
         const state: HighlightResultState = { extraction, request: pendingAnalysis, jobId, projectName, videoPath };
@@ -105,7 +119,7 @@ function HighlightResultRoute() {
       videoName={request.videoName}
       onBack={() => backToUpload(navigate, location)}
       onRetry={() => navigate('/analyzing', { replace: true, state: { ...request, attempt: (request.attempt ?? 0) + 1 } })}
-      onNext={(analysis) => navigate(editorPath(analysis.jobId), { state: analysis })}
+      onNext={(analysis) => navigate(editorPath(analysis.jobId), { state: { ...analysis, projectId: request.projectId } })}
     />
   );
 }
@@ -124,7 +138,90 @@ function EditorRoute() {
       videoPath={analysisResult?.videoPath}
       videoName={analysisResult?.videoName}
       videoUrl={analysisResult?.videoUrl}
-      onBack={() => navigate('/upload')}
+      projectId={analysisResult?.projectId}
+      jobId={analysisResult?.jobId}
+      onBack={() => navigate(analysisResult?.projectId ? '/workspace' : '/upload')}
+    />
+  );
+}
+
+/** 프로젝트 화면에서 연 프로젝트: 서버에 저장된 영상·분석 결과·편집 내용을 불러와 편집하던 화면을 되살린다. */
+function ProjectEditorRoute() {
+  const { projectId } = useParams();
+  const navigate = useNavigate();
+  const { accessToken } = useAuth();
+  const [loaded, setLoaded] = useState<{
+    analysis: HighlightAnalysisResult;
+    editor: EditorSavedState | null;
+    projectName: string;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!projectId || !accessToken) return;
+    let cancelled = false;
+
+    getProjectState(accessToken, projectId)
+      .then((state) => {
+        if (cancelled) return;
+        if (!state.analysis || !state.analysis.segments?.length) {
+          // 분석 결과가 아직 없는 프로젝트는 업로드부터 다시 시작한다.
+          navigate('/upload', { replace: true, state: { projectName: state.project.title, projectId } });
+          return;
+        }
+        if (!state.video?.url) {
+          setError('저장된 원본 영상을 찾을 수 없어요. 영상을 다시 올려 주세요.');
+          return;
+        }
+        setLoaded({
+          analysis: {
+            ...state.analysis,
+            jobId: state.job_id ?? undefined,
+            projectId,
+            projectName: state.project.title,
+            videoPath: state.video.path ?? undefined,
+            videoUrl: state.video.url,
+            videoName: state.video.name ?? undefined,
+          },
+          editor: state.editor,
+          projectName: state.project.title,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setError('프로젝트를 불러오지 못했어요.');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, accessToken, navigate]);
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 text-[15px] text-black/70">
+        <p>{error}</p>
+        <button className="rounded-full bg-black px-5 py-2 text-white" onClick={() => navigate('/workspace')} type="button">
+          프로젝트 목록으로
+        </button>
+      </div>
+    );
+  }
+
+  if (!loaded) return <div className="flex min-h-screen items-center justify-center text-[15px] text-black/50">프로젝트를 불러오는 중…</div>;
+
+  const { analysis, editor, projectName } = loaded;
+
+  return (
+    <EditorScreen
+      analysis={analysis}
+      projectName={projectName}
+      videoPath={analysis.videoPath}
+      videoName={analysis.videoName}
+      videoUrl={analysis.videoUrl}
+      projectId={analysis.projectId}
+      jobId={analysis.jobId}
+      initialEditor={editor ?? undefined}
+      onBack={() => navigate('/workspace')}
     />
   );
 }
@@ -136,7 +233,7 @@ function AuthRoute() {
 
 function ProjectsRoute() {
   const navigate = useNavigate();
-  return <ProjectsScreen onLogoClick={() => navigate('/')} onStartNewProject={(project) => navigate('/upload', { state: project })} />;
+  return <ProjectsScreen onLogoClick={() => navigate('/')} onStartNewProject={(project) => navigate('/upload', { state: project ?? null })} onOpenProject={(projectId) => navigate(`/workspace/${projectId}`)} />;
 }
 
 export default function AppRouter() {
@@ -274,6 +371,16 @@ export default function AppRouter() {
             >
               <RequireAuth>
                 <ProjectsRoute />
+              </RequireAuth>
+            </motion.div>
+          }
+        />
+        <Route
+          path="/workspace/:projectId"
+          element={
+            <motion.div className="min-h-screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3, ease: 'easeInOut' }}>
+              <RequireAuth>
+                <ProjectEditorRoute />
               </RequireAuth>
             </motion.div>
           }

@@ -93,3 +93,25 @@ def get_current_user(authorization: str | None = Header(default=None), db: Sessi
         raise ApiError(401, "UNAUTHORIZED", "토큰이 없거나 만료되었습니다.")
 
     return user
+
+
+VIDEO_TOKEN_TTL_SECONDS = 60 * 60 * 6
+
+
+def create_video_token(user_id: str, project_id: str) -> str:
+    """<video> 태그는 Authorization 헤더를 못 보내므로, 한 프로젝트의 영상만 볼 수 있는 단기 토큰을 주소에 싣는다."""
+    now = datetime.utcnow()
+    payload = {"sub": user_id, "pid": project_id, "scope": "video", "iat": now, "exp": now + timedelta(seconds=VIDEO_TOKEN_TTL_SECONDS)}
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def decode_video_token(token: str, project_id: str) -> str:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.PyJWTError as error:
+        raise ApiError(401, "UNAUTHORIZED", "영상 주소가 만료되었습니다.") from error
+
+    if payload.get("scope") != "video" or payload.get("pid") != project_id:
+        raise ApiError(401, "UNAUTHORIZED", "영상 주소가 올바르지 않습니다.")
+
+    return payload["sub"]

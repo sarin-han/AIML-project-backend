@@ -727,6 +727,22 @@ def resolve_uploaded_video(video_path: str) -> str:
     return real
 
 
+@app.get("/videos/exists")
+def video_exists(video_path: str):
+    """분석용 임시 사본이 아직 있는지. 서버를 다시 켜서 임시 폴더가 비워졌으면 false."""
+    try:
+        resolve_uploaded_video(video_path)
+        return {"exists": True}
+    except HTTPException:
+        return {"exists": False}
+
+
+@app.post("/videos")
+async def upload_video(video: UploadFile = File(...)):
+    """저장해 둔 영상을 다시 올려 분석·내보내기에 쓸 임시 사본을 만든다."""
+    return {"video_path": save_upload_to_temp(await video.read(), video.filename)}
+
+
 @app.post("/analyze/scenarios")
 async def find_scenarios(request: ScenarioFindRequest):
     """이미 분석한 영상에서 시나리오(장면 설명)를 더 찾는다. 구간만 돌려주고 파형은 만들지 않는다.

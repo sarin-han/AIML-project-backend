@@ -6,7 +6,8 @@ test('landing to login to workspace flow works', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.getByAltText('ClipCraft').first()).toBeVisible();
-  await expect(page.getByRole('button', { name: '지금 시작하기' }).first()).toBeVisible();
+  // 로그인하지 않았으면 편집을 시작하는 버튼은 없고 로그인 버튼만 보인다.
+  await expect(page.getByRole('button', { name: '지금 시작하기' })).toHaveCount(0);
 
   await page.getByTestId('login-link').click();
   await expect(page).toHaveURL(/\/login$/);

@@ -1,4 +1,4 @@
-import { ApiError, getApiUrl } from '@/api/client';
+import { ApiError, getApiUrl, authFetch, errorMessageFromBody } from '@/api/client';
 import type { SubtitleStyle, TimelineCue } from '@/lib/subtitles';
 import type { EditorHighlightSegment, SegmentEditSetting } from '@/types/app';
 
@@ -40,7 +40,7 @@ interface ExportJobStatus {
 async function readError(response: Response, fallback: string): Promise<ApiError> {
   const contentType = response.headers.get('content-type') ?? '';
   const body = contentType.includes('application/json') ? await response.json() : null;
-  return new ApiError(body?.message || body?.detail || body?.error || `${fallback}: ${response.status}`, response.status);
+  return new ApiError(errorMessageFromBody(body, `${fallback}: ${response.status}`), response.status);
 }
 
 const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
@@ -59,7 +59,7 @@ export async function requestExportVideo(
 ): Promise<Blob> {
   const endpoint = getApiUrl(import.meta.env.VITE_EXPORT_API_URL, DEFAULT_EXPORT_API_URL);
   const settingsBySegmentId = new Map(segmentEditSettings.map((setting) => [setting.segmentId, setting]));
-  const start = await fetch(`${endpoint}/jobs`, {
+  const start = await authFetch(`${endpoint}/jobs`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -98,7 +98,7 @@ export async function requestExportVideo(
 
     let job: ExportJobStatus;
     try {
-      const response = await fetch(`${endpoint}/jobs/${jobId}`);
+      const response = await authFetch(`${endpoint}/jobs/${jobId}`);
       if (response.status === 404) throw new ApiError('서버가 다시 시작돼서 내보내기가 중단됐어요. 다시 시도해 주세요.', 404);
       if (!response.ok) throw await readError(response, 'Export status failed');
       job = (await response.json()) as ExportJobStatus;
@@ -116,7 +116,7 @@ export async function requestExportVideo(
     if (job.status === 'success') break;
   }
 
-  const download = await fetch(`${endpoint}/jobs/${jobId}/download`);
+  const download = await authFetch(`${endpoint}/jobs/${jobId}/download`);
   if (!download.ok) throw await readError(download, 'Export download failed');
   return download.blob();
 }

@@ -194,6 +194,6 @@ test.describe('찾는 방법 패널', () => {
     await expect(page.getByTestId('method-tab-highlight')).toHaveAttribute('aria-selected', 'true');
     await page.getByTestId('method-tab-manual').click();
     await expect(page.getByTestId('scenario-item-input')).toHaveValue('남아 있어야 하는 장면');
-    await expect(page.getByTestId('project-title')).toHaveText('김치찌개 브이로그 쇼츠');
+    await expect(page.getByTestId('project-title-input')).toHaveValue('김치찌개 브이로그 쇼츠');
   });
 });

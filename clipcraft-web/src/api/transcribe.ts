@@ -1,4 +1,4 @@
-import { ApiError, requestJson } from '@/api/client';
+import { ApiError, requestJson, authFetch, errorMessageFromBody } from '@/api/client';
 import type { SubtitleCue } from '@/types/app';
 
 const TRANSCRIBE_API_URL = '/transcribe';
@@ -18,11 +18,11 @@ interface TranscribeJobStatus {
 }
 
 async function getTranscribeJob(jobId: string): Promise<TranscribeJobStatus> {
-  const response = await fetch(`${TRANSCRIBE_API_URL}/jobs/${jobId}`);
+  const response = await authFetch(`${TRANSCRIBE_API_URL}/jobs/${jobId}`);
   const body = response.headers.get('content-type')?.includes('application/json') ? await response.json() : null;
 
   if (!response.ok) {
-    throw new ApiError(body?.detail || body?.message || `API request failed: ${response.status}`, response.status);
+    throw new ApiError(errorMessageFromBody(body, `API request failed: ${response.status}`), response.status);
   }
 
   return body as TranscribeJobStatus;

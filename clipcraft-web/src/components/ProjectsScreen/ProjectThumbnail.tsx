@@ -57,7 +57,6 @@ export default function ProjectThumbnail({ project, ratio = '16 / 9' }: ProjectT
       )}
 
       {project.duration !== '—' && <div className="absolute right-2 bottom-2 rounded bg-[rgba(0,0,0,0.65)] px-[7px] py-0.5 font-mono text-[10px] tracking-[0.3px] text-white">{project.duration}</div>}
-      {project.format !== '—' && <div className="absolute bottom-2 left-2 rounded bg-[rgba(255,255,255,0.18)] px-[7px] py-0.5 font-mono text-[10px] tracking-[0.3px] text-white backdrop-blur-[3px]">{project.format}</div>}
     </div>
   );
 }

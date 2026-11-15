@@ -16,7 +16,7 @@ export interface ApiStatusResponse<T> {
 export interface ApiErrorBody {
   detail?: string;
   message?: string;
-  error?: string;
+  error?: string | { code?: string; message?: string };
 }
 
 export type ApiRequestBody = BodyInit | null | undefined;

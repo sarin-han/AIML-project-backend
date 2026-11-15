@@ -1,10 +1,9 @@
 import type { PendingHighlightAnalysis } from '@/types/app';
 
 export interface UploadScreenProps {
-  initialProjectFormat?: string;
   initialProjectName?: string;
   onNext: (request: PendingHighlightAnalysis) => void;
-  onLogoClick: () => void;
+  onBack: () => void;
 }
 
 export type UploadStatus = 'idle' | 'loading' | 'success';

@@ -43,7 +43,7 @@ export default function ProjectRow({ onDelete, onDuplicate, onOpen, onRename, on
           <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[14.5px] font-[540] tracking-[-0.2px]">{project.title}</span>
         </div>
         <span className="font-mono text-[11.5px] text-[rgba(0,0,0,0.4)]">
-          {project.scenes}개 장면 · {project.format} · {formatProjectSize(project.sizeMB)}
+          {project.scenes}개 장면 · {formatProjectSize(project.sizeMB)}
         </span>
       </div>
       <div className="justify-self-center max-[980px]:hidden">

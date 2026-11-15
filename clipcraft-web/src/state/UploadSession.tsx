@@ -14,6 +14,9 @@ interface UploadSessionValue {
   setUploadedVideo: (video: UploadedVideo | null) => void;
   method: FindMethod;
   setMethod: (method: FindMethod) => void;
+  /** 업로드 화면에서 입력하는 프로젝트 제목. 하이라이트 추출·시나리오 추천의 기준이 된다. */
+  projectTitle: string;
+  setProjectTitle: (title: string) => void;
   items: ScenarioItem[];
   setItems: (updater: ScenarioItem[] | ((current: ScenarioItem[]) => ScenarioItem[])) => void;
 }
@@ -24,6 +27,7 @@ export function UploadSessionProvider({ children }: { children: ReactNode }) {
   const [uploadedVideo, setUploadedVideoState] = useState<UploadedVideo | null>(null);
   const [method, setMethod] = useState<FindMethod>('manual');
   const [items, setItems] = useState<ScenarioItem[]>([]);
+  const [projectTitle, setProjectTitle] = useState('');
 
   const setUploadedVideo = useCallback((next: UploadedVideo | null) => {
     setUploadedVideoState((previous) => {
@@ -33,8 +37,8 @@ export function UploadSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ uploadedVideo, setUploadedVideo, method, setMethod, items, setItems }),
-    [uploadedVideo, setUploadedVideo, method, items],
+    () => ({ uploadedVideo, setUploadedVideo, method, setMethod, items, setItems, projectTitle, setProjectTitle }),
+    [uploadedVideo, setUploadedVideo, method, items, projectTitle],
   );
 
   return <UploadSessionContext.Provider value={value}>{children}</UploadSessionContext.Provider>;

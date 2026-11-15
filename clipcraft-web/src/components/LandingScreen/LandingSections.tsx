@@ -8,7 +8,8 @@ import { displayClass, monoClass, problems, sectionTitleClass, useCases, wrapCla
 import HeroMockup from '@/components/LandingScreen/HeroMockup';
 import { LandingButton, MonoLabel, SectionHead } from '@/components/LandingScreen/LandingPrimitives';
 
-export function HeroSection({ onStart }: { onStart: () => void }) {
+/** onStart가 없으면(로그인하지 않은 상태) "지금 시작하기" 버튼을 그리지 않는다. */
+export function HeroSection({ onStart }: { onStart?: () => void }) {
   return (
     <section className="overflow-hidden px-0 pb-16 pt-14 sm:pt-[86px]">
       <motion.div className={cn(wrapClass, 'grid items-center gap-16 lg:grid-cols-[1.02fr_1.14fr] lg:gap-12')} variants={landingInnerStagger}>
@@ -17,7 +18,7 @@ export function HeroSection({ onStart }: { onStart: () => void }) {
           <motion.h1 className={cn(displayClass, 'my-[22px] text-[34px] sm:text-[44px] lg:text-[60px]')} variants={landingItemRise}>긴 영상 속<br />원하는 장면을<br /><span className="text-[#5B4CF5]">시나리오</span>로 찾다</motion.h1>
           <motion.p className="max-w-[460px] text-[14px] font-[320] leading-[1.6] tracking-[-0.2px] text-black/60 sm:text-[14.5px]" variants={landingItemRise}>원하는 장면을 한 줄로 설명하면, <br /> ClipCraft가 영상 속에서 가장 어울리는 구간을 찾아 추천합니다. <br /> 이제 장면을 찾는 시간보다, 숏폼을 완성하는 데 집중하세요.</motion.p>
           <motion.div className="mt-[34px] flex flex-wrap items-center gap-3" variants={landingItemRise}>
-            <LandingButton onClick={onStart}>지금 시작하기 <Icon d={icons.arrowR} size={17} strokeWidth={2} /></LandingButton>
+            {onStart && <LandingButton onClick={onStart}>지금 시작하기 <Icon d={icons.arrowR} size={17} strokeWidth={2} /></LandingButton>}
             <LandingButton onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })} variant="white">기능 둘러보기</LandingButton>
           </motion.div>
         </motion.div>
@@ -77,7 +78,7 @@ export function UseCaseSection() {
   );
 }
 
-export function CtaSection({ onStart }: { onStart: () => void }) {
+export function CtaSection({ onStart }: { onStart?: () => void }) {
   return (
     <section className="pb-[104px]" id="start">
       <div className={wrapClass}>
@@ -88,7 +89,7 @@ export function CtaSection({ onStart }: { onStart: () => void }) {
             <motion.h2 className={cn(sectionTitleClass, 'mx-auto mt-[18px] max-w-[17ch] text-[26px] text-white sm:text-[32px] lg:text-[38px]')} variants={landingItemRise}>장면 찾는 시간,<br />이제 AI에게 맡기세요</motion.h2>
             <motion.p className="mx-auto mt-[18px] max-w-[46ch] text-[14px] font-[320] leading-[1.6] tracking-[-0.2px] text-white/90 sm:text-[14.5px]" variants={landingItemRise}>시나리오 한 줄이면 충분합니다. 긴 영상에서 원하는 순간을 찾아 숏폼으로 만드는 가장 빠른 길, ClipCraft에서 무료로 시작해보세요.</motion.p>
             <motion.div className="mt-[34px] flex flex-wrap items-center justify-center gap-3" variants={landingItemRise}>
-              <LandingButton onClick={onStart} variant="white">지금 시작하기 <Icon d={icons.arrowR} size={17} strokeWidth={2} /></LandingButton>
+              {onStart && <LandingButton onClick={onStart} variant="white">지금 시작하기 <Icon d={icons.arrowR} size={17} strokeWidth={2} /></LandingButton>}
               <LandingButton onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })} variant="glass">기능 둘러보기</LandingButton>
             </motion.div>
           </motion.div>

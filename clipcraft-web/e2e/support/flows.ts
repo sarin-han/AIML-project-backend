@@ -91,12 +91,9 @@ export async function createProject(page: Page, name = projectName) {
   await mockAuthApi(page);
   await page.goto('/workspace');
   await page.getByTestId('new-project-button').click();
-  await page.getByTestId('project-name-input').fill(name);
-  await expect(page.getByTestId('aspect-ratio-select').first()).toContainText('세로 9:16');
-  await page.getByTestId('start-editing-button').click();
   await expect(page).toHaveURL(/\/upload$/);
-  await expect(page.getByTestId('project-title')).toHaveText(name);
-  await expect(page.getByTestId('project-aspect-ratio')).toHaveText('세로 9:16');
+  await page.getByTestId('project-title-input').fill(name);
+  await expect(page.getByTestId('project-title-input')).toHaveValue(name);
 }
 
 export async function uploadSampleVideo(page: Page) {
