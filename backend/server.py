@@ -7,11 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from app import models, security
+from app import models, security, uploads
 from app.database import get_db, init_db
 from app.envelope import register_error_handlers
 from app.routers import auth as auth_router
 from app.routers import projects as projects_router
+from app.routers import uploads as uploads_router
 from app.routers.projects import ensure_project_gpu_video
 from app.projects_storage import save_project_video
 from sqlalchemy.orm import Session
@@ -31,6 +32,7 @@ init_db()
 register_error_handlers(app)
 app.include_router(auth_router.router)
 app.include_router(projects_router.router)
+app.include_router(uploads_router.router)
 
 GPU_SERVER_URL = os.environ.get("GPU_SERVER_URL", "http://host.docker.internal:8001").rstrip("/")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -61,7 +63,8 @@ async def health():
 
 @app.post("/analyze/jobs")
 async def start_analyze_job(
-    video: UploadFile = File(...),
+    video: UploadFile | None = File(None),
+    upload_id: str | None = Form(None),
     project_name: str = Form(...),
     scenarios: str = Form(...),
     known_segments: str | None = Form(None),
@@ -69,15 +72,15 @@ async def start_analyze_job(
     current_user: models.User = Depends(security.get_current_user),
     db: Session = Depends(get_db),
 ):
-    content = await video.read()
-    store_project_video(db, current_user, project_id, video, content)
-    files = {
-        "video": (
-            video.filename or "video.mp4",
-            content,
-            video.content_type or "application/octet-stream",
-        )
-    }
+    upload_key, source = await incoming_video(video, upload_id, current_user)
+    try:
+        return await run_analyze_job(db, current_user, source, project_id, project_name, scenarios, known_segments)
+    finally:
+        uploads.discard_upload(upload_key)
+
+
+async def run_analyze_job(db: Session, current_user: models.User, source: uploads.UploadedVideo, project_id: str | None, project_name: str, scenarios: str, known_segments: str | None) -> dict:
+    store_project_video(db, current_user, project_id, source)
     data = {"project_name": project_name, "scenarios": scenarios}
 
     # GPU 서버의 ReVision은 영어 질문 기준이다. OpenAI 키는 이 백엔드에만 있으므로 여기서 번역해서 함께 보낸다.
@@ -104,9 +107,7 @@ async def start_analyze_job(
                 queries_en[index] = query
             data["queries_en"] = json.dumps(queries_en, ensure_ascii=False)
 
-    async with httpx.AsyncClient(timeout=None) as client:
-        response = await client.post(f"{GPU_SERVER_URL}/analyze/jobs", files=files, data=data)
-
+    response = await forward_video("/analyze/jobs", source, data)
     raise_upstream_error(response)
     return response.json()
 
@@ -129,37 +130,58 @@ async def project_title_en(project_name: str | None) -> str | None:
     return translated[0] if translated else None
 
 
-def store_project_video(db: Session, user: models.User, project_id: str | None, video: UploadFile, content: bytes) -> None:
+async def incoming_video(video: UploadFile | None, upload_id: str | None, user: models.User) -> tuple[str, uploads.UploadedVideo]:
+    """분석할 영상을 받는다. 조각 업로드(upload_id)를 쓰거나, 기존처럼 multipart로 바로 받는다."""
+    if upload_id:
+        return upload_id, uploads.get_upload(user.id, upload_id)
+    if video is None:
+        raise HTTPException(status_code=422, detail="영상 또는 upload_id가 필요해요.")
+    temp_id = uploads.new_temp_upload(user.id, video.filename, video.content_type, await video.read())
+    return temp_id, uploads.get_upload(user.id, temp_id)
+
+
+def store_project_video(db: Session, user: models.User, project_id: str | None, source: uploads.UploadedVideo) -> None:
     """분석하려고 올린 영상을 프로젝트에 저장해 두어, 나중에 프로젝트를 열 때 다시 올리지 않게 한다."""
     if not project_id:
         return
     project = db.get(models.Project, project_id)
     if not project or project.user_id != user.id or project.deleted_at is not None:
         raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없어요.")
-    save_project_video(db, project, video.filename, video.content_type, content)
+    save_project_video(db, project, source.filename, source.content_type, source.path)
 
 
-async def forward_video(path: str, video: UploadFile, data: dict) -> httpx.Response:
-    files = {"video": (video.filename or "video.mp4", await video.read(), video.content_type or "application/octet-stream")}
-    async with httpx.AsyncClient(timeout=None) as client:
-        return await client.post(f"{GPU_SERVER_URL}{path}", files=files, data=data)
+async def forward_video(path: str, source: uploads.UploadedVideo, data: dict) -> httpx.Response:
+    with source.path.open("rb") as handle:
+        files = {"video": (source.filename or "video.mp4", handle, source.content_type or "application/octet-stream")}
+        async with httpx.AsyncClient(timeout=None) as client:
+            return await client.post(f"{GPU_SERVER_URL}{path}", files=files, data=data)
 
 
-@app.post("/recommend", dependencies=[Depends(security.get_current_user)])
-async def recommend_scenes(video: UploadFile = File(...), project_name: str | None = Form(None)):
+@app.post("/recommend")
+async def recommend_scenes(
+    video: UploadFile | None = File(None),
+    upload_id: str | None = Form(None),
+    project_name: str | None = Form(None),
+    current_user: models.User = Depends(security.get_current_user),
+):
     """영상을 보고 찾아볼 만한 장면을 추천한다. 검색은 하지 않는다."""
     data = {}
     if title_en := await project_title_en(project_name):
         data["title_en"] = title_en
 
-    response = await forward_video("/recommend", video, data)
+    upload_key, source = await incoming_video(video, upload_id, current_user)
+    try:
+        response = await forward_video("/recommend", source, data)
+    finally:
+        uploads.discard_upload(upload_key)
     raise_upstream_error(response)
     return response.json()
 
 
 @app.post("/highlights/jobs")
 async def start_highlight_job(
-    video: UploadFile = File(...),
+    video: UploadFile | None = File(None),
+    upload_id: str | None = Form(None),
     project_name: str = Form(...),
     project_id: str | None = Form(None),
     current_user: models.User = Depends(security.get_current_user),
@@ -170,10 +192,12 @@ async def start_highlight_job(
     if title_en := await project_title_en(project_name):
         data["title_en"] = title_en
 
-    content = await video.read()
-    store_project_video(db, current_user, project_id, video, content)
-    await video.seek(0)
-    response = await forward_video("/highlights/jobs", video, data)
+    upload_key, source = await incoming_video(video, upload_id, current_user)
+    try:
+        store_project_video(db, current_user, project_id, source)
+        response = await forward_video("/highlights/jobs", source, data)
+    finally:
+        uploads.discard_upload(upload_key)
     raise_upstream_error(response)
     return response.json()
 
@@ -205,7 +229,8 @@ async def start_job_from_project(kind: str, body: FromProjectBody, user: models.
 
 @app.post("/scenario/jobs")
 async def start_scenario_job(
-    video: UploadFile = File(...),
+    video: UploadFile | None = File(None),
+    upload_id: str | None = Form(None),
     project_name: str = Form(...),
     project_id: str | None = Form(None),
     current_user: models.User = Depends(security.get_current_user),
@@ -216,10 +241,12 @@ async def start_scenario_job(
     if title_en := await project_title_en(project_name):
         data["title_en"] = title_en
 
-    content = await video.read()
-    store_project_video(db, current_user, project_id, video, content)
-    await video.seek(0)
-    response = await forward_video("/scenario/jobs", video, data)
+    upload_key, source = await incoming_video(video, upload_id, current_user)
+    try:
+        store_project_video(db, current_user, project_id, source)
+        response = await forward_video("/scenario/jobs", source, data)
+    finally:
+        uploads.discard_upload(upload_key)
     raise_upstream_error(response)
     return response.json()
 

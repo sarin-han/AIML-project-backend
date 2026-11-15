@@ -1,3 +1,4 @@
+import { uploadVideoInChunks } from '@/api/uploads';
 import { requestJson } from '@/api/client';
 
 export interface ProjectJobStart {
@@ -47,9 +48,9 @@ export const startProjectScenarioJob = (projectId: string) => postJson('/scenari
 export const getScenarioJob = (jobId: string) => requestJson<ScenarioJobStatus>(`/scenario/jobs/${jobId}`);
 
 /** 업로드 화면에서 올린 영상으로 시나리오 추천을 시작한다. 영상은 프로젝트에도 저장된다. */
-export function startScenarioJob(file: File, projectName: string, projectId?: string) {
+export async function startScenarioJob(file: File, projectName: string, projectId?: string) {
   const formData = new FormData();
-  formData.append('video', file, file.name);
+  formData.append('upload_id', await uploadVideoInChunks(file));
   formData.append('project_name', projectName);
   if (projectId) formData.append('project_id', projectId);
 

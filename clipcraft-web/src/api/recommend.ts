@@ -1,3 +1,4 @@
+import { uploadVideoInChunks } from '@/api/uploads';
 import { getApiUrl, requestJson } from '@/api/client';
 
 const DEFAULT_RECOMMEND_API_URL = '/recommend';
@@ -26,7 +27,7 @@ function getRecommendEndpoint(): string {
  */
 export async function recommendScenes(file: File, projectName?: string): Promise<RecommendedScene[]> {
   const formData = new FormData();
-  formData.append('video', file, file.name);
+  formData.append('upload_id', await uploadVideoInChunks(file));
   if (projectName?.trim()) formData.append('project_name', projectName.trim());
 
   const response = await requestJson<RecommendResponse>(getRecommendEndpoint(), {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Icon from '@/components/Icon';
 import { icons, type IconName } from '@/components/icons';
 import { cn } from '@/lib/cn';
@@ -17,17 +18,27 @@ interface MenuItem {
 
 export default function ProjectActionMenu({ onDelete, onDuplicate, onRename, onToggleStar, project }: ProjectActionMenuProps) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
 
     const close = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!menuRef.current?.contains(target) && !popupRef.current?.contains(target)) setOpen(false);
     };
+    const dismiss = () => setOpen(false);
 
     document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
+    window.addEventListener('scroll', dismiss, true);
+    window.addEventListener('resize', dismiss);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      window.removeEventListener('scroll', dismiss, true);
+      window.removeEventListener('resize', dismiss);
+    };
   }, [open]);
 
   const items: MenuItem[] = [
@@ -43,6 +54,8 @@ export default function ProjectActionMenu({ onDelete, onDuplicate, onRename, onT
         className="flex h-[30px] w-[30px] cursor-pointer items-center justify-center rounded-lg border-0 transition-colors"
         onClick={(event) => {
           event.stopPropagation();
+          const rect = event.currentTarget.getBoundingClientRect();
+          setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
           setOpen((current) => !current);
         }}
         style={{ background: open ? 'rgba(0,0,0,0.07)' : 'transparent' }}
@@ -50,11 +63,12 @@ export default function ProjectActionMenu({ onDelete, onDuplicate, onRename, onT
       >
         <Icon d={icons.more} size={16} stroke="rgba(0,0,0,0.55)" strokeWidth={2} />
       </button>
-      {open && (
+      {open && pos && createPortal(
         <div
-          className="absolute top-[34px] right-0 z-[120] min-w-[184px] rounded-[12px] border border-black/[0.14] p-1.5 text-black shadow-[0_18px_44px_rgba(0,0,0,0.18),0_4px_12px_rgba(0,0,0,0.1)] ring-1 ring-white"
+          ref={popupRef}
+          className="fixed z-[2000] min-w-[184px] rounded-[12px] border border-black/[0.14] p-1.5 text-black shadow-[0_18px_44px_rgba(0,0,0,0.18),0_4px_12px_rgba(0,0,0,0.1)] ring-1 ring-white"
           onClick={(event) => event.stopPropagation()}
-          style={{ backgroundColor: '#fff', backdropFilter: 'none', opacity: 1 }}
+          style={{ backgroundColor: '#fff', backdropFilter: 'none', opacity: 1, top: pos.top, right: pos.right }}
         >
           {items.map((item) => (
             <button
@@ -83,7 +97,8 @@ export default function ProjectActionMenu({ onDelete, onDuplicate, onRename, onT
             <Icon d={icons.trash} size={13} stroke="#dc2626" />
             삭제
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

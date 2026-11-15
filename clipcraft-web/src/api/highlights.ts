@@ -1,3 +1,4 @@
+import { uploadVideoInChunks } from '@/api/uploads';
 import { ApiError, getApiUrl, requestJson, authFetch, errorMessageFromBody } from '@/api/client';
 import type { HighlightCandidate, HighlightExtractionResult } from '@/types/app';
 
@@ -63,7 +64,7 @@ export function normalizeHighlightResult(result: NonNullable<HighlightJobStatus[
 /** 시나리오 없이 영상 전체 길이를 분석하는 작업을 시작한다. */
 export async function startHighlightJob(file: File, projectName: string, projectId?: string): Promise<HighlightJobStartResponse> {
   const formData = new FormData();
-  formData.append('video', file, file.name);
+  formData.append('upload_id', await uploadVideoInChunks(file));
   formData.append('project_name', projectName);
   if (projectId) formData.append('project_id', projectId);
 

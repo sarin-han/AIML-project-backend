@@ -28,7 +28,7 @@ def video_file(row: models.ProjectData | None) -> Path | None:
     return path if path.is_file() else None
 
 
-def save_project_video(db: Session, project: models.Project, filename: str | None, content_type: str | None, content: bytes) -> None:
+def save_project_video(db: Session, project: models.Project, filename: str | None, content_type: str | None, source: Path) -> None:
     """분석에 올라온 영상을 프로젝트에 붙여 저장한다. 이미 있으면 바꾼다."""
     suffix = re.sub(r"[^A-Za-z0-9.]", "", os.path.splitext(filename or "")[1])[:10] or ".mp4"
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
@@ -38,13 +38,13 @@ def save_project_video(db: Session, project: models.Project, filename: str | Non
     if row.video_storage_path and row.video_storage_path != relative:
         (DATA_DIR / row.video_storage_path).unlink(missing_ok=True)
 
-    (DATA_DIR / relative).write_bytes(content)
+    shutil.copyfile(source, DATA_DIR / relative)
     shutil.rmtree(FRAME_DIR / project.id, ignore_errors=True)  # 새 영상이면 이전 영상에서 뽑은 미리보기는 버린다
     row.video_filename = filename or f"video{suffix}"
     row.video_content_type = content_type or "video/mp4"
     row.video_storage_path = relative
     row.gpu_video_path = None  # 새 영상이므로 이전 분석용 사본은 더 이상 맞지 않는다
-    project.source_size_bytes = len(content)
+    project.source_size_bytes = source.stat().st_size
     db.add(project)
     db.commit()
 

@@ -1,4 +1,5 @@
 import { ApiError, getApiUrl, requestJson, authFetch, errorMessageFromBody } from '@/api/client';
+import { uploadVideoInChunks } from '@/api/uploads';
 import type { HighlightAnalysisData, ScenarioItem } from '@/types/app';
 
 const DEFAULT_ANALYZE_API_URL = '/analyze';
@@ -75,7 +76,7 @@ export async function startAnalyzeJob(file: File, scenarios: ScenarioItem[], pro
   const endpoint = `${getAnalyzeEndpoint()}/jobs`;
 
   const formData = new FormData();
-  formData.append('video', file, file.name);
+  formData.append('upload_id', await uploadVideoInChunks(file));
   formData.append('project_name', buildProjectName(file, projectName));
   formData.append('scenarios', JSON.stringify(scenarios.map((item) => item.ko)));
   if (projectId) formData.append('project_id', projectId);
