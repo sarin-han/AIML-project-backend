@@ -5,7 +5,8 @@
 - 로그인·회원가입·토큰 갱신·로그아웃, 프로젝트 목록·생성·이름 변경·즐겨찾기·삭제(복구)·복제가 서버 DB에 저장된다. 코드는 `backend/app/`에 있고 API는 `/api/v1`이다.
 - DB는 `DATABASE_URL` 환경변수로 고른다. 비우면 SQLite(`backend/data/clipcraft.db`), `postgresql://사용자:비밀번호@호스트:5432/DB이름`을 넣으면 PostgreSQL이다.
 - 프론트는 로그인 화면과 프로젝트 화면이 이 API를 쓴다. 로그인하지 않으면 업로드·분석·편집·프로젝트 화면이 로그인 화면으로 넘어간다.
-- 영상 분석, 자동 자막, 번역, 시나리오 자막, 채팅 편집, 음성 받아쓰기, MP4 내보내기는 기존 경로(`backend/server.py`)에 그대로 있다.
+- 영상 분석, 자동 자막, 번역, 시나리오 자막, 채팅 편집, 음성 받아쓰기는 기존 경로(`backend/server.py`)에 있다.
+- MP4 내보내기는 작업 방식이다. `POST /export/jobs`로 시작하고 `GET /export/jobs/{id}`로 진행률을 보다가 `GET /export/jobs/{id}/download`로 받는다(자세한 것은 `docs/PROGRESS.md`의 "내보내기(비동기)"). 작업 정보는 GPU 서버 메모리에 있어서 서버를 다시 시작하면 사라진다.
 
 ## 아직 안 되는 것
 
@@ -33,7 +34,7 @@
 - 지금 편집 내용은 브라우저의 localStorage에만 있다. 이것을 서버 DB의 프로젝트에 저장하도록 바꾼다. 저장되는 것은 다음과 같다.
   - 구간 편집: 시작과 끝, 순서, 삭제한 구간, 구간별 배속과 음소거 (`clipcraft-web/src/lib/editorStorage.ts`, 키 `editor-segment-edit-settings`, `editor-deleted-segment-ids`)
   - 자막: 자막 문구와 시간, 위치, 글자 스타일, 음성 자막과 시나리오 자막 두 묶음 (`clipcraft-web/src/lib/subtitles.ts`, 키 `editor-subtitles:영상경로`, `editor-subtitle-style`)
-  - 화면 비율 (`clipcraft-web/src/lib/aspect.ts`, 키 `clipcraft.aspect`)
+  - 화면 비율은 지금 편집 화면에서 원본 비율만 쓰고 고르는 화면이 없어서 저장할 것이 없다(서버의 `output_aspect` 내보내기 옵션은 남아 있다).
 - 편집 화면을 열 때 서버에서 불러오고, 편집할 때마다(너무 잦지 않게 잠깐 모아서) 저장한다. 되돌리기 기록은 브라우저 메모리에 있으므로 서버에 저장하지 않아도 된다.
 - 동시에 두 곳에서 열었을 때 덮어쓰지 않도록 프로젝트의 `version`으로 충돌을 검사한다. 이 검사는 프로젝트 수정 API에 이미 있다.
 - 명세: 10.1, 10.2절(편집 상태 조회·저장). 작업 기록(11절)은 그 다음에 해도 된다.
@@ -45,7 +46,7 @@
 
 ### 5. 로그인 검사 적용
 
-- 분석, 번역, 시나리오 자막, 채팅 편집, 음성 받아쓰기, 내보내기 API는 지금 로그인 없이 열려 있다. 외부에 공개하면 누구든 OpenAI 비용을 쓸 수 있다.
+- 분석, 번역, 시나리오 자막, 채팅 편집, 음성 받아쓰기, 내보내기(`/export/jobs`) API는 지금 로그인 없이 열려 있다. 외부에 공개하면 누구든 OpenAI 비용을 쓸 수 있다.
 - 백엔드는 `Depends(security.get_current_user)`를 걸고, 프론트는 해당 요청에 `Authorization: Bearer 토큰` 헤더를 싣는다. 요청을 보내는 곳은 `clipcraft-web/src/api/`의 각 파일이다.
 - 영상 분석은 사용자별 사용량 제한도 같이 생각한다.
 
@@ -60,8 +61,9 @@
 - DB는 같은 서버에 PostgreSQL 컨테이너를 띄워도 되고(추가 요금 없음), RDS를 써도 된다. 어느 쪽이든 `DATABASE_URL`만 바꾸면 된다.
 - 8000번 포트는 접속할 사람의 IP에만 열어 둔다.
 - OpenAI 키, JWT 비밀값, DB 비밀번호는 코드나 저장소에 적지 말고 서버의 환경변수로만 넣는다.
+- 내보내기의 ffmpeg 처리는 로컬에서 실제 영상으로 돌려 보지 못했다(가짜 GPU 서버와 작업 로직 시험만 했다). 서버에 올린 뒤 짧은 영상으로 구간 자르기, 이어 붙이기, 자막 입히기를 한 번 확인한다.
 
 ## 테스트 상태
 
-- 프론트 e2e는 31개 중 28개가 통과한다. 실패 3개는 이번 작업과 무관하다. 편집 화면 디자인을 바꾸면서 시간 표시가 `1:01`에서 `01:01`로 바뀌었는데 테스트가 옛 표시를 기대하는 것 2건(`editor-add-scenario`, `highlight-flow`)과, 전부터 실패하던 `hidden-segment-indicator` 1건이다.
+- 프론트 e2e는 34개 중 31개가 통과한다. 실패 3개는 이번 작업과 무관하다. 편집 화면 디자인을 바꾸면서 시간 표시가 `1:01`에서 `01:01`로 바뀌었는데 테스트가 옛 표시를 기대하는 것 2건(`editor-add-scenario`, `highlight-flow`)과, 전부터 실패하던 `hidden-segment-indicator` 1건이다.
 - 로그인과 프로젝트 API는 e2e에서 서버 대신 가짜 응답(`clipcraft-web/e2e/support/flows.ts`의 `mockAuthApi`)을 쓴다. 위 작업으로 API가 바뀌면 이 가짜 응답도 같이 맞춰야 한다.
