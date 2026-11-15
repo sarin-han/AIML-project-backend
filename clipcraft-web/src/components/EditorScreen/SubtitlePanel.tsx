@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { SUGGEST_TONE_OPTIONS } from '@/api/suggest';
 import type { SuggestTone } from '@/api/suggest';
-import { cueUsedBySegments, EXTRA_LANGUAGES, formatCueTime, setCueDragData, SUBTITLE_COLORS, SUBTITLE_FONT_OPTIONS, SUBTITLE_POSITION_PRESETS } from '@/lib/subtitles';
+import { cueUsedBySegments, EXTRA_LANGUAGES, formatCueTime, SUBTITLE_COLORS, SUBTITLE_FONT_OPTIONS, SUBTITLE_POSITION_PRESETS } from '@/lib/subtitles';
 import type { SubtitleSetKey, SubtitleStyle } from '@/lib/subtitles';
 import type { SubtitleCue } from '@/types/app';
 
@@ -439,33 +439,25 @@ export default function SubtitlePanel({
       {cues.length > 0 && visibleCues.length === 0 && <p className="px-5 pb-3 text-[12px] text-[rgba(0,0,0,0.4)]">{activeClip ? `클립 ${activeClip.index + 1}에는` : '선택한 장면 안에는'} 자막이 없어요. "전체 자막 보기"를 누르면 모든 자막이 보여요.</p>}
 
       <div className="flex flex-col gap-1.5 px-5 pb-3">
-        {cues.map((cue, index) =>
-          !visibleCues.includes(cue) ? null : (
+        {visibleCues.map((cue, visibleIndex) => {
+          // 클립별로 보면 그 클립 안에서 1번부터, 전체로 보면 전체 순서대로 번호를 붙인다.
+          const index = viewMode === 'all' ? cues.indexOf(cue) : visibleIndex;
+
+          return (
           <div
             className={`flex items-start gap-2 rounded-lg border px-2.5 py-1.5 ${cue.id === selectedCueId ? 'border-black/50 bg-[rgba(0,0,0,0.04)]' : 'border-[rgba(0,0,0,0.08)]'} ${usedCueIds.has(cue.id) ? '' : 'opacity-55'}`}
             key={cue.id}
             onMouseDown={() => cue.id !== selectedCueId && onCueSelect(cue.id)}
           >
-            <span
-              className="flex w-6 shrink-0 cursor-grab flex-col items-center pt-0.5 font-mono text-[10px] text-[rgba(0,0,0,0.35)] select-none active:cursor-grabbing"
-              draggable
-              onDragStart={(event) => {
-                onCueSelect(cue.id);
-                setCueDragData(event.dataTransfer, cue.id);
-              }}
-              title="파형(시간)이나 영상 화면(위치)으로 끌어다 놓으세요"
-            >
-              <span className="text-[11px] leading-none">⠿</span>
-              {index + 1}
-            </span>
+            <span className="flex w-6 shrink-0 flex-col items-center pt-0.5 font-mono text-[10px] text-[rgba(0,0,0,0.35)] select-none">{index + 1}</span>
             <div className="flex flex-1 flex-col gap-0.5">
               <textarea
                 aria-label={`자막 ${index + 1}`}
                 autoFocus={cue.id === focusCueId}
-                className="min-h-[24px] resize-none border-0 bg-transparent p-0 text-[13px] leading-snug outline-none"
+                className="min-h-[40px] resize-none border-0 bg-transparent p-0 text-[13px] leading-snug outline-none"
                 onChange={(event) => onCueChange(cue.id, event.target.value)}
                 placeholder="자막 내용을 입력하세요"
-                rows={Math.max(1, Math.ceil(cue.text.length / 28))}
+                rows={Math.max(2, cue.text.split('\n').length, Math.ceil(cue.text.length / 28))}
                 value={cue.text}
               />
               {cue.original && <span className="text-[11px] leading-snug text-[rgba(0,0,0,0.4)]">{cue.original}</span>}
@@ -509,8 +501,8 @@ export default function SubtitlePanel({
               ×
             </button>
           </div>
-          ),
-        )}
+          );
+        })}
       </div>
 
       {cues.length > 0 && (

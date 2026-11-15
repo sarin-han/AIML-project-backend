@@ -22,11 +22,35 @@ def _resolve_model_path() -> str:
     return snapshots[-1]
 
 
+def _preload_cuda_libs() -> None:
+    """pip(nvidia-*-cu12)로 설치된 CUDA 라이브러리는 LD_LIBRARY_PATH에 없어서 faster-whisper가
+    'libcublas.so.12 is not found' 오류를 낼 수 있다. 모델을 불러오기 전에 직접 로드해 둔다."""
+    import ctypes
+    import importlib.util
+
+    for package, names in (("nvidia.cublas", ("libcublas.so.12",)), ("nvidia.cudnn", ("libcudnn.so.9", "libcudnn.so.8"))):
+        try:
+            spec = importlib.util.find_spec(package)
+        except (ImportError, ValueError):
+            continue
+        locations = list(spec.submodule_search_locations or []) if spec else []
+        for location in locations:
+            for name in names:
+                path = os.path.join(location, "lib", name)
+                if os.path.exists(path):
+                    try:
+                        ctypes.CDLL(path, mode=ctypes.RTLD_GLOBAL)
+                    except OSError:
+                        pass
+                    break
+
+
 def get_model():
     global _model
     if _model is None:
         with _model_lock:
             if _model is None:
+                _preload_cuda_libs()
                 from faster_whisper import WhisperModel
 
                 _model = WhisperModel(_resolve_model_path(), device="cuda", compute_type="float16")

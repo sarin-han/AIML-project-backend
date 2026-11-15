@@ -31,7 +31,6 @@ export interface WaveformTimelineProps {
   activeCueId?: number;
   duration: number;
   onCueAdd: (time: number) => void;
-  onCueDrop: (cueId: number, time: number) => void;
   onCueMove: (cueId: number, start: number) => void;
   onCueSelect: (cueId: number) => void;
   selectedCueId: number | null;

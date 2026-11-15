@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { DragEvent, MouseEvent } from 'react';
+import type { MouseEvent } from 'react';
 import type { RefObject } from 'react';
 import { getAspectLabel, getAspectRatio } from '@/lib/aspect';
 import type { AspectSetting } from '@/lib/aspect';
-import { readCueDragData, SUBTITLE_FONT_OPTIONS } from '@/lib/subtitles';
+import { SUBTITLE_FONT_OPTIONS } from '@/lib/subtitles';
 import type { CueLines, SubtitleStyle } from '@/lib/subtitles';
 
 interface VideoPreviewProps {
@@ -12,7 +12,6 @@ interface VideoPreviewProps {
   /** true면 자막을 끌어서 옮길 수 있다(선택된 자막이 지금 보일 때) */
   draggable?: boolean;
   /** 목록에서 끌어온 자막을 화면에 놓았을 때(x: 가로 %, yCenter: 아래에서 자막 가운데까지 %) */
-  onCueDrop?: (cueId: number, position: { x: number; yCenter: number }) => void;
   onSubtitleMove?: (position: { x: number; y: number }) => void;
   onSubtitleResize?: (size: number) => void;
   subtitlePosition?: { x?: number; y?: number };
@@ -53,7 +52,7 @@ interface FrameSize {
   width: number;
 }
 
-export default function VideoPreview({ aspect = 'source', draggable = false, onCueDrop, onEnded, onLoadedMetadata, onSubtitleMove, onSubtitleResize, onTimeUpdate, subtitleLines, subtitlePosition, subtitleStyle, videoRef, videoUrl }: VideoPreviewProps) {
+export default function VideoPreview({ aspect = 'source', draggable = false, onEnded, onLoadedMetadata, onSubtitleMove, onSubtitleResize, onTimeUpdate, subtitleLines, subtitlePosition, subtitleStyle, videoRef, videoUrl }: VideoPreviewProps) {
   const [boxElement, setBoxElement] = useState<HTMLDivElement | null>(null);
   const [containerElement, setContainerElement] = useState<HTMLDivElement | null>(null);
   const [frame, setFrame] = useState<FrameSize | null>(null);
@@ -62,7 +61,6 @@ export default function VideoPreview({ aspect = 'source', draggable = false, onC
   const frameElementRef = useRef<HTMLDivElement>(null);
   const textElementRef = useRef<HTMLSpanElement>(null);
   const [guides, setGuides] = useState<Guides | null>(null);
-  const [dropActive, setDropActive] = useState(false);
 
   // 영상은 object-contain으로 그려지므로, 자막 기준이 되는 "실제 영상 화면" 크기를 계산한다(내보낸 영상과 같은 비율).
   useEffect(() => {
@@ -160,23 +158,6 @@ export default function VideoPreview({ aspect = 'source', draggable = false, onC
     window.addEventListener('mouseup', onUp);
   };
 
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setDropActive(false);
-
-    const cueId = readCueDragData(event.dataTransfer);
-    if (cueId === null || !boxElement || !frame || !onCueDrop) return;
-
-    // 놓은 지점을 영상 화면(object-contain으로 가운데 놓인 실제 영상 영역) 기준 %로 바꾼다.
-    const box = boxElement.getBoundingClientRect();
-    const left = box.left + (box.width - frame.width) / 2;
-    const top = box.top + (box.height - frame.height) / 2;
-    onCueDrop(cueId, {
-      x: ((event.clientX - left) / frame.width) * 100,
-      yCenter: (1 - (event.clientY - top) / frame.height) * 100,
-    });
-  };
-
   /** 모서리 핸들을 끌면 자막 크기가 가로 폭에 비례해 바뀐다. */
   const startSubtitleResize = (event: MouseEvent<HTMLElement>) => {
     const textElement = textElementRef.current;
@@ -204,15 +185,8 @@ export default function VideoPreview({ aspect = 'source', draggable = false, onC
     <div ref={setContainerElement} className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
       <div
         ref={setBoxElement}
-        className={`relative shrink-0 overflow-hidden rounded-[10px] bg-[#0a0500] ${dropActive ? 'ring-2 ring-[#5b4bff]' : ''}`}
+        className={`relative shrink-0 overflow-hidden rounded-[10px] bg-[#0a0500]`}
         style={fit ? { height: fit.height, width: fit.width } : { aspectRatio: String(ratio), height: '100%' }}
-        onDragLeave={() => setDropActive(false)}
-        onDragOver={(event) => {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'move';
-          setDropActive(true);
-        }}
-        onDrop={handleDrop}
       >
         {videoUrl ? (
           <video

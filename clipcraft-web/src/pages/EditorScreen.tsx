@@ -769,31 +769,6 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     setSelectedCueId(null);
   };
 
-  /** 목록에서 끌어온 자막을 파형 위에 놓으면 그 시간으로 옮긴다(길이는 유지). */
-  const onCueDropOnTimeline = (cueId: number, time: number) => {
-    beginEdit();
-    onCueMove(cueId, time);
-    setSelectedCueId(cueId);
-    setProgress(Math.min(1, Math.max(0, time / playbackDuration)));
-    setPlaying(false);
-  };
-
-  /** 목록에서 끌어온 자막을 영상 화면에 놓으면 그 위치로 옮기고, 보이도록 자막 시작 위치로 이동한다. */
-  const onCueDropOnScreen = (cueId: number, position: { x: number; yCenter: number }) => {
-    beginEdit();
-    const cue = subtitles.find((item) => item.id === cueId);
-    if (!cue) return;
-
-    const style = resolveCueStyle(cue, subtitleStyle);
-    const lineCount = cue.text.split('\n').length + (subtitleStyle.bilingual && cue.original ? cue.original.split('\n').length : 0);
-    const heightPct = style.size * 1.25 * lineCount;
-
-    onCuePatch(cueId, { x: Math.min(95, Math.max(5, position.x)), y: Math.min(95, Math.max(0, position.yCenter - heightPct / 2)) });
-    setSelectedCueId(cueId);
-    setProgress(Math.min(1, Math.max(0, cue.start / playbackDuration)));
-    setPlaying(false);
-  };
-
   const onDownloadSrt = () => {
     downloadTextFile(buildSrt(subtitles, segments, segmentEditSettings, subtitleStyle.bilingual, subtitleStyle.showExtra), 'clipcraft_subtitles.srt');
   };
@@ -999,6 +974,11 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     }
   };
 
+  // 자막 탭은 지금 재생 위치가 속한 클립의 자막을 모아서 보여 준다(클립이 바뀌면 따라 바뀐다). 클립 밖이면 마지막으로 고른 클립.
+  const playheadClipIndex = segments.findIndex((segment) => currentTime >= segment.start && currentTime < segment.end);
+  const subtitleClipIndex = playheadClipIndex >= 0 ? playheadClipIndex : activeSegment !== null && segments[activeSegment] ? activeSegment : null;
+  const subtitleClip = subtitleClipIndex !== null ? { end: segments[subtitleClipIndex].end, index: subtitleClipIndex, start: segments[subtitleClipIndex].start } : null;
+
   const clampPanelWidth = (value: number) => {
     const rootWidth = rootRef.current?.getBoundingClientRect().width ?? 1200;
     return Math.round(Math.max(PANEL_MIN, Math.min(value, PANEL_MAX, rootWidth * 0.55)));
@@ -1107,7 +1087,6 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
             onLoadedMetadata={syncVideoMetadata}
             onTimeUpdate={syncVideoProgress}
             draggable={Boolean(activeCue && activeCue.id === selectedCueId)}
-            onCueDrop={onCueDropOnScreen}
             onSubtitleMove={(position) => activeCue && onCuePositionChange(activeCue.id, position)}
             onSubtitleResize={(size) => activeCue && onCueSizeChange(activeCue.id, size)}
             subtitleLines={activeCue ? getCueLines(activeCue, subtitleStyle.bilingual, subtitleStyle.showExtra) : undefined}
@@ -1137,7 +1116,6 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
           duration={duration}
           activeCueId={activeCue?.id}
           onCueAdd={onCueAdd}
-          onCueDrop={onCueDropOnTimeline}
           onCueMove={onCueMove}
           onCueSelect={(cueId) => {
             setSelectedCueId(cueId);
@@ -1223,7 +1201,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
           </>
         ) : (
           <SubtitlePanel
-            activeClip={activeSegment !== null && segments[activeSegment] ? { end: segments[activeSegment].end, index: activeSegment, start: segments[activeSegment].start } : null}
+            activeClip={subtitleClip}
             activeSet={subtitleSets.active}
             cues={subtitles}
             extraBusy={extraBusy}

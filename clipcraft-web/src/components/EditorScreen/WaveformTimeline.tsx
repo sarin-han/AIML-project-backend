@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { DragEvent, MouseEvent } from 'react';
-import { cueUsedBySegments, readCueDragData } from '@/lib/subtitles';
+import type { MouseEvent } from 'react';
+import { cueUsedBySegments } from '@/lib/subtitles';
 import Icon from '@/components/Icon';
 import MonoLabel from '@/components/MonoLabel';
 import type { WaveformTimelineProps } from '@/types/pages/EditorScreen';
@@ -33,7 +33,6 @@ export default function WaveformTimeline({
   activeCueId,
   duration,
   onCueAdd,
-  onCueDrop,
   onCueMove,
   onCueSelect,
   onCueTimeChange,
@@ -51,7 +50,6 @@ export default function WaveformTimeline({
   waveHeights: heights,
 }: WaveformTimelineProps) {
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 1;
-  const [dropActive, setDropActive] = useState(false);
   const [snapTime, setSnapTime] = useState<number | null>(null);
   const [zoomRaw, setZoomRaw] = useState(1);
   const [viewStartRaw, setViewStartRaw] = useState(0);
@@ -197,19 +195,6 @@ export default function WaveformTimeline({
     window.addEventListener('mouseup', onUp);
   };
 
-  /** 목록에서 끌어온 자막을 파형 위에 놓으면, 놓은 가로 위치를 시간으로 바꿔 알려 준다. */
-  const handleCueDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setDropActive(false);
-
-    const cueId = readCueDragData(event.dataTransfer);
-    const track = event.currentTarget.querySelector('[data-cue-track]');
-    if (cueId === null || !track) return;
-
-    const rect = track.getBoundingClientRect();
-    onCueDrop(cueId, fromRatio((event.clientX - rect.left) / rect.width));
-  };
-
   /** 자막 막대의 가장자리(길이 조절) 또는 몸통(통째로 이동)을 드래그한다. 움직임 없이 놓으면 그 위치로 이동만 한다. */
   const startCueDrag = (event: MouseEvent<HTMLElement>, cueId: number, mode: 'start' | 'end' | 'move') => {
     event.preventDefault();
@@ -337,14 +322,7 @@ export default function WaveformTimeline({
 
       <div
         ref={containerRef}
-        className={`relative overflow-hidden rounded-[8px] border bg-[#f6f6f5] ${dropActive ? 'border-[#5b4bff] ring-2 ring-[#5b4bff]/40' : 'border-[rgba(0,0,0,0.08)]'}`}
-        onDragLeave={() => setDropActive(false)}
-        onDragOver={(event) => {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'move';
-          setDropActive(true);
-        }}
-        onDrop={handleCueDrop}
+        className={`relative overflow-hidden rounded-[8px] border bg-[#f6f6f5] border-[rgba(0,0,0,0.08)]`}
       >
         {snapTime !== null && toPercent(snapTime) >= 0 && toPercent(snapTime) <= 100 && (
           <div className="pointer-events-none absolute top-0 bottom-0 z-[6] w-[2px] -translate-x-1/2" style={{ background: '#5b4bff', boxShadow: '0 0 6px rgba(91,75,255,0.6)', left: `${toPercent(snapTime)}%` }} />
