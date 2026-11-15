@@ -37,6 +37,12 @@ export interface WaveformTimelineProps {
   selectedCueId: number | null;
   onCueTimeChange: (cueId: number, edge: 'start' | 'end', time: number) => void;
   onSegmentChange: (segmentId: number, edge: 'start' | 'end', time: number) => void;
+  /** 타임라인의 번호 핀을 눌렀을 때(목록 순서 기준 index) */
+  onSegmentPick: (index: number) => void;
+  activeSegmentId: number | null;
+  /** 자막 트랙 접기/펴기 */
+  subtitleTrackOpen: boolean;
+  onSubtitleTrackToggle: () => void;
   progress: number;
   segments: EditorHighlightSegment[];
   setPlaying: Dispatch<SetStateAction<boolean>>;
@@ -47,7 +53,10 @@ export interface WaveformTimelineProps {
 
 export interface HighlightListProps {
   activeSegment: number | null;
+  /** 지금 재생 위치(초). 이 시간이 속한 구간도 선택처럼 강조한다. */
+  currentTime: number;
   onSegmentClick: (index: number) => void;
+  onSegmentDelete: (segmentId: number) => void;
   onSegmentsReorder: (fromIndex: number, toIndex: number) => void;
   segmentEditSettings: SegmentEditSetting[];
   segments: EditorHighlightSegment[];

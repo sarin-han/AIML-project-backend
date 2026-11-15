@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useTheme } from '@/App';
 import PillButton from '@/components/PillButton';
 import UploadHeader from '@/components/UploadScreen/UploadHeader';
 import StepIndicator from '@/components/UploadScreen/StepIndicator';
 import VideoUploadPanel from '@/components/UploadScreen/VideoUploadPanel';
-import ScenarioPanel from '@/components/UploadScreen/ScenarioPanel';
+import MethodPanel from '@/components/UploadScreen/MethodPanel';
 import { containerStagger, fadeInUp } from '@/lib/animations';
 import { cn } from '@/lib/cn';
 import { captureVideoThumbnail, formatDuration, formatFileSize, isVideoFile, loadVideoDuration, MAX_VIDEO_DURATION_SECONDS } from '@/lib/videoUpload';
-import type { ScenarioItem } from '@/types/app';
-import type { UploadedVideo, UploadScreenProps, UploadStatus } from '@/types/pages/UploadScreen';
+import { useUploadSession } from '@/state/UploadSession';
+import type { UploadScreenProps, UploadStatus } from '@/types/pages/UploadScreen';
 
 export default function UploadFlow({ initialProjectFormat, initialProjectName, onLogoClick, onNext }: UploadScreenProps) {
   const { accent, density } = useTheme();
@@ -19,20 +19,14 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
   const panelPadding = density === 'compact' ? 'p-5' : density === 'spacious' ? 'p-9' : 'p-7';
   const accentTint = `${accent}18`;
 
-  const [items, setItems] = useState<ScenarioItem[]>([]);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadedVideo, setUploadedVideo] = useState<UploadedVideo | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
+  // 올린 영상·고른 방법·입력한 장면은 화면 밖에 있어서 다른 화면에 다녀와도 남는다.
+  const { uploadedVideo, setUploadedVideo, method, setMethod, items, setItems } = useUploadSession();
+
+  const [selectedFile, setSelectedFile] = useState<File | null>(uploadedVideo?.file ?? null);
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus>(uploadedVideo ? 'success' : 'idle');
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadPct, setUploadPct] = useState(0);
-  const videoObjectUrlRef = useRef<string | null>(null);
   const scrollPositionRef = useRef<number>(0);
-
-  useEffect(() => {
-    return () => {
-      if (videoObjectUrlRef.current) URL.revokeObjectURL(videoObjectUrlRef.current);
-    };
-  }, []);
 
   useEffect(() => {
     if (uploadStatus !== 'loading') {
@@ -40,15 +34,15 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
       return;
     }
     let pct = 0;
-    const iv = setInterval(() => {
+    const timer = window.setInterval(() => {
       pct += Math.random() * 10 + (pct < 60 ? 5 : 1.5);
       if (pct >= 90) {
-        clearInterval(iv);
+        window.clearInterval(timer);
         pct = 90;
       }
       setUploadPct(Math.round(Math.min(90, pct)));
     }, 120);
-    return () => clearInterval(iv);
+    return () => window.clearInterval(timer);
   }, [uploadStatus]);
 
   const hasUploadedVideo = uploadStatus === 'success' && uploadedVideo !== null;
@@ -60,7 +54,9 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
   }, [hasUploadedVideo]);
 
   const useEmptyStateDesign = !hasUploadedVideo;
-  const canStartEditing = hasUploadedVideo && items.length > 0;
+  const isHighlightMethod = method === 'highlight';
+  const hasScenario = items.length > 0;
+  const canStart = hasUploadedVideo && (isHighlightMethod || hasScenario);
   const projectTitle = initialProjectName?.trim() || '영상 편집 시작하기';
 
   const triggerUploadError = (message: string) => {
@@ -75,11 +71,6 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
     setUploadError(null);
     setUploadedVideo(null);
     setSelectedFile(file);
-
-    if (videoObjectUrlRef.current) {
-      URL.revokeObjectURL(videoObjectUrlRef.current);
-      videoObjectUrlRef.current = null;
-    }
 
     if (!isVideoFile(file)) {
       triggerUploadError('동영상 파일만 업로드할 수 있습니다');
@@ -99,7 +90,6 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
       }
 
       const thumbnailUrl = await captureVideoThumbnail(objectUrl, duration);
-      videoObjectUrlRef.current = objectUrl;
       setUploadedVideo({ file, fileName: file.name, duration, durationLabel: formatDuration(duration), sizeLabel: formatFileSize(file.size), thumbnailUrl, objectUrl });
       setSelectedFile(file);
       setUploadStatus('success');
@@ -110,26 +100,31 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
     }
   };
 
-  const startHighlightAnalysis = () => {
-    if (!uploadedVideo || !canStartEditing) return;
-    videoObjectUrlRef.current = null;
+  const startAnalysis = () => {
+    if (!uploadedVideo || !canStart) return;
     onNext({
       file: uploadedVideo.file,
       projectName: initialProjectName?.trim() || uploadedVideo.fileName.replace(/\.[^/.]+$/, '') || uploadedVideo.fileName,
-      scenarios: items,
+      mode: isHighlightMethod ? 'highlight' : 'scenario',
+      scenarios: isHighlightMethod ? [] : items,
       videoPath: '',
       videoUrl: uploadedVideo.objectUrl,
       videoName: uploadedVideo.fileName,
+      videoDuration: uploadedVideo.duration,
     });
   };
 
-  const handleItemsChange = useCallback((updated: ScenarioItem[]) => {
-    setItems(updated);
-  }, []);
+  const ctaLabel = isHighlightMethod ? '하이라이트 추출하기' : `시나리오로 장면 찾기${items.length ? ` · ${items.length}개` : ''}`;
+  const checklist: [string, boolean][] = isHighlightMethod
+    ? [['영상 업로드', hasUploadedVideo]]
+    : [
+        ['영상 업로드', hasUploadedVideo],
+        ['장면 1개 이상', hasScenario],
+      ];
 
   return (
     <motion.div
-      className="flex min-h-screen flex-col items-center px-16 pt-9 pb-20 bg-white w-full"
+      className="flex min-h-screen w-full flex-col items-center bg-canvas px-16 pt-9 pb-20 max-[760px]:px-5"
       variants={containerStagger}
       initial={shouldReduceMotion ? false : 'hidden'}
       animate={shouldReduceMotion ? undefined : 'visible'}
@@ -138,10 +133,7 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
 
       <StepIndicator />
 
-      <motion.div
-        className={cn('upload-panels grid w-full grid-cols-2 gap-4 max-[900px]:grid-cols-1', useEmptyStateDesign ? 'mb-8' : 'mb-10')}
-        variants={containerStagger}
-      >
+      <motion.div className={cn('upload-panels grid w-full grid-cols-2 gap-4 max-[760px]:grid-cols-1', useEmptyStateDesign ? 'mb-8' : 'mb-10')} variants={containerStagger}>
         <VideoUploadPanel
           accent={accent}
           panelPadding={panelPadding}
@@ -156,23 +148,28 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
           useEmptyStateDesign={useEmptyStateDesign}
           onFileSelect={(file) => void processVideoFile(file)}
         />
-        <ScenarioPanel
+        <MethodPanel
           accent={accent}
           panelPadding={panelPadding}
           accentTint={accentTint}
-          useEmptyStateDesign={useEmptyStateDesign}
-          onItemsChange={handleItemsChange}
+          method={method}
+          onMethodChange={setMethod}
+          items={items}
+          onItemsChange={setItems}
+          videoFile={hasUploadedVideo ? uploadedVideo.file : null}
+          videoDurationLabel={hasUploadedVideo ? uploadedVideo.durationLabel : undefined}
+          projectName={initialProjectName?.trim() || undefined}
         />
       </motion.div>
 
-      <motion.div className="will-change-[transform,opacity]" variants={fadeInUp}>
+      <motion.div className="flex flex-col items-center gap-3 will-change-[transform,opacity]" variants={fadeInUp}>
         <motion.div
           className="inline-block rounded-full"
           animate={
             shouldReduceMotion
               ? undefined
               : {
-                  boxShadow: canStartEditing
+                  boxShadow: canStart
                     ? ['0 0 0 rgba(0,0,0,0)', `0 10px 28px ${accent}24`, `0 6px 18px ${accent}18`]
                     : [`0 6px 18px ${accent}18`, '0 0 0 rgba(0,0,0,0)', '0 0 0 rgba(0,0,0,0)'],
                 }
@@ -181,15 +178,34 @@ export default function UploadFlow({ initialProjectFormat, initialProjectName, o
         >
           <PillButton
             variant="accent"
-            onClick={startHighlightAnalysis}
-            icon="wand"
-            disabled={!canStartEditing}
+            onClick={startAnalysis}
+            icon={isHighlightMethod ? 'zap' : 'wand'}
+            disabled={!canStart}
             testId="analyze-start-button"
             className="px-10 py-3.5 [font-family:'Plus_Jakarta_Sans','Noto_Sans_KR',sans-serif] text-base font-bold tracking-[-0.3px]"
           >
-            분석 시작하기
+            {ctaLabel}
           </PillButton>
         </motion.div>
+
+        {!canStart && (
+          <div className="flex items-center gap-4" data-testid="start-checklist">
+            {checklist.map(([text, ok], index) => (
+              <div key={text} className="flex items-center gap-4">
+                {index > 0 && <span className="h-px w-4 bg-[rgba(0,0,0,0.1)]" />}
+                <span className="flex items-center gap-[5px] text-xs text-ink-56">
+                  <span
+                    className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full"
+                    style={{ border: `1.5px solid ${ok ? accent : 'rgba(0,0,0,0.28)'}` }}
+                  >
+                    {ok && <span className="h-1.5 w-1.5 rounded-full" style={{ background: accent }} />}
+                  </span>
+                  {text}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </motion.div>
     </motion.div>
   );

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import type { DragEvent, MouseEvent } from 'react';
 import { cueUsedBySegments, readCueDragData } from '@/lib/subtitles';
 import Icon from '@/components/Icon';
-import { icons } from '@/components/icons';
 import MonoLabel from '@/components/MonoLabel';
 import type { WaveformTimelineProps } from '@/types/pages/EditorScreen';
 import type { OverlaySegment } from '@/types/app';
@@ -39,6 +38,10 @@ export default function WaveformTimeline({
   onCueSelect,
   onCueTimeChange,
   onSegmentChange,
+  onSegmentPick,
+  onSubtitleTrackToggle,
+  activeSegmentId,
+  subtitleTrackOpen,
   progress,
   segments,
   selectedCueId,
@@ -85,7 +88,7 @@ export default function WaveformTimeline({
     if (!container) return;
 
     const onWheel = (event: WheelEvent) => {
-      const track = container.querySelector('[data-cue-track]');
+      const track = container.querySelector('[data-view-track]');
       if (!track) return;
 
       const current = viewRef.current;
@@ -144,15 +147,15 @@ export default function WaveformTimeline({
   const viewHeights = heights.map((_, index) => sample(viewStart + ((index + 0.5) / heights.length) * viewLength));
 
   const markers = segments
-    .flatMap((segment) => [
-      { id: `${segment.id}-start`, edge: 'start' as const, segmentId: segment.id, time: segment.start },
-      { id: `${segment.id}-end`, edge: 'end' as const, segmentId: segment.id, time: segment.end },
+    .flatMap((segment, listIndex) => [
+      { id: `${segment.id}-start`, edge: 'start' as const, listIndex, segmentId: segment.id, time: segment.start },
+      { id: `${segment.id}-end`, edge: 'end' as const, listIndex, segmentId: segment.id, time: segment.end },
     ])
     .sort((a, b) => a.time - b.time);
-  const overlaySegments: OverlaySegment[] = segments.flatMap((segment, index) => {
+  const overlaySegments: OverlaySegment[] = segments.flatMap((segment) => {
     if (!visible(segment.start, segment.end)) return [];
 
-    const colors = overlayColors[index % overlayColors.length];
+    const colors = overlayColors[(segment.id - 1 + overlayColors.length * 1000) % overlayColors.length];
     const left = Math.max(0, toPercent(segment.start));
     const right = Math.min(100, toPercent(segment.end));
 
@@ -160,6 +163,7 @@ export default function WaveformTimeline({
       {
         left,
         width: Math.max(1, right - left),
+        id: segment.id,
         label: segment.scenario,
         sub: `${formatTime(segment.start, fineLabels)}-${formatTime(segment.end, fineLabels)}`,
         ...colors,
@@ -167,7 +171,7 @@ export default function WaveformTimeline({
     ];
   });
 
-  const startMarkerDrag = (event: MouseEvent<HTMLButtonElement>, segmentId: number, edge: 'start' | 'end') => {
+  const startMarkerDrag = (event: MouseEvent<HTMLButtonElement>, segmentId: number, edge: 'start' | 'end', listIndex: number) => {
     event.preventDefault();
     event.stopPropagation();
     setPlaying(false);
@@ -187,6 +191,7 @@ export default function WaveformTimeline({
       window.removeEventListener('mouseup', onUp);
     };
 
+    onSegmentPick(listIndex);
     updateTime(event.clientX);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -292,17 +297,27 @@ export default function WaveformTimeline({
   const playheadPercent = toPercent(playheadTime);
   const playheadVisible = playheadPercent >= 0 && playheadPercent <= 100;
   const zoomButtonClass =
-    'flex h-[18px] min-w-[18px] cursor-pointer items-center justify-center rounded border border-[rgba(0,0,0,0.14)] bg-white px-1 font-mono text-[9px] leading-none text-[rgba(0,0,0,0.6)] hover:border-black/40 disabled:cursor-default disabled:opacity-35';
+    'flex h-6 min-w-6 flex-none cursor-pointer items-center justify-center rounded-full border-0 bg-black/5 px-2 text-[11.5px] leading-none whitespace-nowrap text-black/60 hover:bg-black/10 disabled:cursor-default disabled:opacity-35';
 
   return (
-    <div className="flex flex-col gap-2.5 border-b border-[rgba(0,0,0,0.08)] px-5 py-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Icon d={icons.sparkles} size={11} stroke="rgba(0,0,0,0.38)" strokeWidth={2} />
-          <MonoLabel className="text-[8.5px] tracking-[0.08em]">시나리오 하이라이트</MonoLabel>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {selectedCue && (
+    <div className="flex flex-col gap-2 px-5 pt-3 pb-3.5 max-[900px]:px-4">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <MonoLabel>Timeline</MonoLabel>
+        <button
+          aria-expanded={subtitleTrackOpen}
+          className="inline-flex h-6 flex-none cursor-pointer items-center gap-[5px] rounded-full border-0 bg-black/5 px-2.5 text-[11.5px] font-[480] whitespace-nowrap text-black/65"
+          data-testid="subtitle-track-toggle"
+          onClick={onSubtitleTrackToggle}
+          type="button"
+        >
+          자막 트랙<span className="opacity-50">{subtitleCues.length}</span>
+          <span className="inline-flex transition-transform" style={{ transform: subtitleTrackOpen ? 'rotate(180deg)' : 'none' }}>
+            <Icon d="M6 9l6 6 6-6" size={12} strokeWidth={1.6} />
+          </span>
+        </button>
+        <div className="flex-1" />
+        <div className="flex flex-none items-center gap-1.5">
+          {selectedCue && subtitleTrackOpen && (
             <button className={zoomButtonClass} onClick={() => zoomToRange(selectedCue.start, selectedCue.end)} title="선택한 자막 구간을 확대해서 보기" type="button">
               자막 확대
             </button>
@@ -310,14 +325,13 @@ export default function WaveformTimeline({
           <button aria-label="파형 축소" className={zoomButtonClass} disabled={!zoomed} onClick={() => zoomByButton(1 / ZOOM_STEP)} title="축소 (⌘/Ctrl + 스크롤)" type="button">
             −
           </button>
-          <span className="w-9 text-center font-mono text-[8.5px] text-[rgba(0,0,0,0.4)]">×{zoom.toFixed(1)}</span>
+          <span className="w-9 text-center font-mono text-[11px] text-black/50">×{zoom.toFixed(1)}</span>
           <button aria-label="파형 확대" className={zoomButtonClass} disabled={zoom >= maxZoom - 0.001} onClick={() => zoomByButton(ZOOM_STEP)} title="확대 (⌘/Ctrl + 스크롤)" type="button">
             +
           </button>
           <button className={zoomButtonClass} disabled={!zoomed} onClick={() => zoomTo(1, 0, 0)} title="전체 보기" type="button">
             전체
           </button>
-          <MonoLabel className="ml-1 text-[8.5px] tracking-[0.08em]">{formatTime(safeDuration)}</MonoLabel>
         </div>
       </div>
 
@@ -336,26 +350,30 @@ export default function WaveformTimeline({
           <div className="pointer-events-none absolute top-0 bottom-0 z-[6] w-[2px] -translate-x-1/2" style={{ background: '#5b4bff', boxShadow: '0 0 6px rgba(91,75,255,0.6)', left: `${toPercent(snapTime)}%` }} />
         )}
         <div className="relative h-5 border-b border-[rgba(0,0,0,0.08)] bg-[#efeeed]">
-          {markers.map((marker, index) => {
+          {markers.map((marker) => {
             const position = toPercent(marker.time);
             if (position < 0 || position > 100) return null;
+
+            const markerColor = overlayColors[(marker.segmentId - 1 + overlayColors.length * 1000) % overlayColors.length].border;
 
             return (
               <button
                 key={marker.id}
-                aria-label={`${index + 1}번 ${marker.edge === 'start' ? '시작' : '끝'} 지점 조절`}
+                aria-label={`${marker.listIndex + 1}번 ${marker.edge === 'start' ? '시작' : '끝'} 지점 조절`}
                 data-testid={marker.edge === 'start' ? 'segment-start-input' : 'segment-end-input'}
                 className="absolute top-1/2 z-[4] flex h-[13px] w-[13px] cursor-ew-resize items-center justify-center rounded-full border-0 p-0 font-mono text-[6.5px] font-bold text-white transition-transform hover:scale-125"
-                onMouseDown={(event) => startMarkerDrag(event, marker.segmentId, marker.edge)}
+                onMouseDown={(event) => startMarkerDrag(event, marker.segmentId, marker.edge, marker.listIndex)}
                 style={{
-                  background: accent,
+                  background: markerColor,
+                  border: marker.segmentId === activeSegmentId ? '2px solid #000' : 'none',
                   left: `${position}%`,
                   transform: 'translate(-50%,-50%)',
+                  zIndex: marker.segmentId === activeSegmentId ? 5 : 4,
                 }}
                 title="좌우로 드래그해서 구간을 조절"
                 type="button"
               >
-                {index + 1}
+                {marker.listIndex + 1}
               </button>
             );
           })}
@@ -367,6 +385,7 @@ export default function WaveformTimeline({
             setProgress(fromRatio((event.clientX - rect.left) / rect.width) / safeDuration);
             setPlaying(false);
           }}
+          data-view-track
           className="relative flex h-[50px] cursor-crosshair items-center gap-px px-0.5 py-[3px]"
         >
           {viewHeights.map((height, index) => (
@@ -382,12 +401,14 @@ export default function WaveformTimeline({
 
           {overlaySegments.map((segment) => (
             <div
-              key={segment.label}
+              key={segment.id}
               className="absolute top-0 bottom-0 z-[2] flex flex-col items-start justify-center overflow-hidden border-l-2 border-r-2 px-1"
               style={{
                 background: segment.bg,
                 borderLeftColor: segment.border,
                 borderRightColor: segment.border,
+                outline: segment.id === activeSegmentId ? `1.5px solid ${segment.border}` : 'none',
+                outlineOffset: -1.5,
                 left: `${segment.left}%`,
                 width: `${segment.width}%`,
               }}
@@ -404,7 +425,7 @@ export default function WaveformTimeline({
           {playheadVisible && <div className="pointer-events-none absolute top-0 bottom-0 z-[4] w-[1.5px]" style={{ background: accent, left: `${playheadPercent}%` }} />}
         </div>
 
-        <div
+        {subtitleTrackOpen && <div
           className="relative h-[30px] border-t border-[rgba(0,0,0,0.08)] bg-[#faf9f8]"
           data-cue-track
           onDoubleClick={(event) => {
@@ -467,7 +488,7 @@ export default function WaveformTimeline({
             );
           })}
           {playheadVisible && <div className="pointer-events-none absolute top-0 bottom-0 z-[4] w-[1.5px]" style={{ background: accent, left: `${playheadPercent}%` }} />}
-        </div>
+        </div>}
 
         <div className="flex justify-between border-t border-[rgba(0,0,0,0.08)] bg-[#efeeed] px-1.5 py-[3px]">
           {timeMarks.map((time, index) => (

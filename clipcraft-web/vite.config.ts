@@ -25,6 +25,8 @@ export default defineConfig(({ mode }) => {
         '/translate': backendUrl,
         '/chat': backendUrl,
         '/suggest-subtitles': backendUrl,
+        '/recommend': backendUrl,
+        '/highlights': backendUrl,
       },
     },
   };

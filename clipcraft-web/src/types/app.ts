@@ -10,6 +10,38 @@ export interface ScenarioItem {
   id: number;
   ko: string;
   en: string;
+  /** AI가 추천한 항목이면 true. 사용자가 직접 쓰거나 고치면 false/undefined가 된다. */
+  rec?: boolean;
+  /**
+   * 추천받을 때 함께 받은 구간(초). 있으면 분석할 때 이 장면을 다시 검색하지 않고 이 시간을 그대로 쓴다.
+   * 사용자가 문구를 고치면 장면이 달라진 것이므로 지운다.
+   */
+  start?: number;
+  end?: number;
+}
+
+/** 업로드 화면에서 고르는 "찾는 방법" */
+export type FindMethod = 'manual' | 'recommend' | 'highlight';
+
+/** 분석 모드: scenario는 입력한 장면을 찾고, highlight는 시나리오 없이 영상 전체를 분석한다. */
+export type AnalysisMode = 'scenario' | 'highlight';
+
+/** 하이라이트 후보 구간 (초 단위) */
+export interface HighlightCandidate {
+  id: number;
+  start: number;
+  end: number;
+  label: string;
+  /** 서버가 주는 썸네일 URL. 없으면 화면에서 영상 프레임을 직접 캡처한다. */
+  thumbnail?: string;
+}
+
+/** 하이라이트 추출 결과 */
+export interface HighlightExtractionResult {
+  duration: number;
+  highlights: HighlightCandidate[];
+  barCount: number;
+  amplitudes: number[];
 }
 
 export interface HighlightSegment {
@@ -46,6 +78,8 @@ export interface HighlightAnalysisData {
 }
 
 export interface HighlightAnalysisResult extends HighlightAnalysisData {
+  /** 분석을 돌린 서버 작업 ID. 편집 화면 주소(/editor/:jobId)에 쓴다. */
+  jobId?: string;
   projectName?: string;
   videoPath?: string;
   videoUrl?: string;
@@ -55,6 +89,12 @@ export interface HighlightAnalysisResult extends HighlightAnalysisData {
 export interface PendingHighlightAnalysis {
   file: File;
   projectName: string;
+  /** 기본값은 'scenario'. 'highlight'이면 scenarios는 비어 있다. */
+  mode?: AnalysisMode;
+  /** "다시 추출"처럼 같은 요청을 새 작업으로 다시 돌릴 때 올린다. */
+  attempt?: number;
+  /** 올린 영상의 전체 길이(초). 분석 중 화면의 스캔 줄에 쓴다. */
+  videoDuration?: number;
   scenarios: ScenarioItem[];
   videoPath: string;
   videoUrl: string;
@@ -68,6 +108,7 @@ export interface Segment {
 }
 
 export interface OverlaySegment {
+  id: number;
   left: number;
   width: number;
   label: string;

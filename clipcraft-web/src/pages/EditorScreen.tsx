@@ -1,24 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { downloadExportedVideo, requestExportVideo } from '@/api/export';
 import { ApiError } from '@/api/client';
 import { requestChatEdit } from '@/api/chatEdit';
 import { requestSubtitleSuggestions } from '@/api/suggest';
 import type { SuggestTone } from '@/api/suggest';
 import { requestTranslations, translateCuesToKorean } from '@/api/translate';
+import { findScenarios } from '@/api/scenarios';
+import type { FoundScenario } from '@/api/scenarios';
 import { requestSubtitles } from '@/api/transcribe';
 import { useTheme } from '@/App';
 import Icon from '@/components/Icon';
 import { icons } from '@/components/icons';
 import Logo from '@/components/Logo';
-import PillButton from '@/components/PillButton';
 import AiAssistant from '@/components/EditorScreen/AiAssistant';
 import HighlightList from '@/components/EditorScreen/HighlightList';
+import ScenarioAddBar from '@/components/EditorScreen/ScenarioAddBar';
 import SubtitlePanel from '@/components/EditorScreen/SubtitlePanel';
 import PlayerControls, { getScrubPosition } from '@/components/EditorScreen/PlayerControls';
 import VideoPreview from '@/components/EditorScreen/VideoPreview';
 import WaveformTimeline from '@/components/EditorScreen/WaveformTimeline';
-import { ASPECT_OPTIONS, getAspectRatio, loadAspectSetting, saveAspectSetting, toExportAspect } from '@/lib/aspect';
-import type { AspectSetting } from '@/lib/aspect';
 import { applyChatEditCommands } from '@/lib/chatEditCommands';
 import { applyEditorNaturalLanguageCommand } from '@/lib/editorNaturalLanguageCommands';
 import { buildSrt, downloadTextFile, EXTRA_LANGUAGES, findActiveCue, cueUsedBySegments, getCueLines, loadSubtitleSets, mapCuesToTimeline, resolveCueStyle, loadSubtitleStyle, saveSubtitleSets, saveSubtitleStyle } from '@/lib/subtitles';
@@ -26,6 +27,7 @@ import type { SubtitleSetKey, SubtitleSets, SubtitleStyle } from '@/lib/subtitle
 import { loadDeletedSegmentIds, loadSegmentEditSettings, saveDeletedSegmentIds, saveSegmentEditSettings } from '@/lib/editorStorage';
 import type { EditorHighlightSegment, ExportState, SegmentEditSetting, SubtitleCue } from '@/types/app';
 import type { EditorScreenProps, NaturalLanguageCommandResult } from '@/types/pages/EditorScreen';
+import { createId } from '@/lib/id';
 
 const fallbackWaveHeights = Array.from(
   { length: 88 },
@@ -178,11 +180,34 @@ async function captureSegmentThumbnail(videoUrl: string, start: number, end: num
 /** 되돌리기 대상: 하이라이트 구간 편집, 배속·음소거, 삭제, 자막, 자막 기본 스타일 */
 interface EditSnapshot {
   deletedSegmentIds: number[];
+  /** 편집 화면에서 "시나리오 추가"로 더한 구간(분석 결과에는 없는 것) */
+  extraSegments: EditorHighlightSegment[];
   segmentEditSettings: SegmentEditSetting[];
   segments: EditorHighlightSegment[];
   subtitleSets: SubtitleSets;
   subtitleStyle: SubtitleStyle;
 }
+
+const PANEL_DEFAULT = 380;
+const PANEL_MIN = 300;
+const PANEL_MAX = 640;
+const PANEL_STORAGE_KEY = 'cc-ed-pw';
+
+function loadPanelWidth(): number {
+  try {
+    const saved = Number(localStorage.getItem(PANEL_STORAGE_KEY));
+    return saved >= PANEL_MIN && saved <= PANEL_MAX ? saved : PANEL_DEFAULT;
+  } catch {
+    return PANEL_DEFAULT;
+  }
+}
+
+/** 상단 바에서만 쓰는 아이콘(공용 아이콘 세트에 없는 것) */
+const editorIcons = {
+  arrowLeft: 'M19 12H5M12 19l-7-7 7-7',
+  redo: 'M21 7v6h-6M21 13a9 9 0 11-9-9 9 9 0 016.7 3',
+  undo: 'M3 7v6h6M3 13a9 9 0 109-9 9 9 0 00-6.7 3',
+};
 
 const HISTORY_LIMIT = 100;
 /** 이 시간(ms) 안에 이어진 변경(끌기, 연속 입력)은 한 번의 편집으로 묶는다. */
@@ -197,6 +222,7 @@ function snapshotsDiffer(a: EditSnapshot, b: EditSnapshot): boolean {
 export default function EditorWorkspace({ analysis, onBack, projectName, videoPath, videoName, videoUrl }: EditorScreenProps) {
   const { accent } = useTheme();
   const [deletedSegmentIds, setDeletedSegmentIds] = useState<number[]>(loadDeletedSegmentIds);
+  const [extraSegments, setExtraSegments] = useState<EditorHighlightSegment[]>([]);
   const [segments, setSegments] = useState<EditorHighlightSegment[]>(() => filterDeletedSegments(analysis?.segments ?? [], loadDeletedSegmentIds()));
   const duration = analysis?.duration && analysis.duration > 0 ? analysis.duration : 15 * 60;
   const waveHeights = amplitudesToWaveHeights(analysis?.amplitudes ?? []);
@@ -221,14 +247,17 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     beginEdit();
     setSubtitleSets((current) => ({ ...current, [key]: cues, active: cues.length > 0 ? key : current.active }));
     setSelectedCueId(null);
+    if (cues.length > 0) setSubtitleTrackOpen(true);
   };
   const [subtitleGenerating, setSubtitleGenerating] = useState(false);
   const [subtitleProgress, setSubtitleProgress] = useState(0);
   const [subtitleLanguage, setSubtitleLanguage] = useState('');
   const [subtitleTranslate, setSubtitleTranslate] = useState(true);
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(loadSubtitleStyle);
-  const [aspect, setAspect] = useState<AspectSetting>(loadAspectSetting);
-  const [sourceRatio, setSourceRatio] = useState<number | null>(null);
+  const [tab, setTab] = useState<'scenes' | 'subs'>('scenes');
+  const [subtitleTrackOpen, setSubtitleTrackOpen] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(loadPanelWidth);
+  const rootRef = useRef<HTMLDivElement>(null);
   const [exportWithSubtitles, setExportWithSubtitles] = useState(true);
   const [selectedCueId, setSelectedCueId] = useState<number | null>(null);
   const [focusCueId, setFocusCueId] = useState<number | null>(null);
@@ -269,11 +298,12 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
       return;
     }
 
-    const sourceSegments = analysis?.segments ?? [];
+    // 분석 결과 + 편집 화면에서 추가한 구간
+    const sourceSegments = [...(analysis?.segments ?? []), ...extraSegments];
 
     setSegments(filterDeletedSegments(sourceSegments, deletedSegmentIds));
     setSegmentEditSettings((current) => filterStoredEditSettings(current, sourceSegments, deletedSegmentIds));
-  }, [analysis?.segments, deletedSegmentIds]);
+  }, [analysis?.segments, extraSegments, deletedSegmentIds]);
 
   useEffect(() => {
     saveSegmentEditSettings(segmentEditSettings);
@@ -282,10 +312,6 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
   useEffect(() => {
     saveSubtitleStyle(subtitleStyle);
   }, [subtitleStyle]);
-
-  useEffect(() => {
-    saveAspectSetting(aspect);
-  }, [aspect]);
 
   useEffect(() => {
     saveSubtitleSets(videoPath, subtitleSets);
@@ -422,6 +448,15 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     );
   };
 
+  /** 목록의 × 버튼: 채팅으로 지우는 것과 같은 방식으로 구간을 빼고, 되돌리기 한 번으로 복구할 수 있게 한다. */
+  const onSegmentDelete = (segmentId: number) => {
+    beginEdit();
+    skipSegmentSyncRef.current = true;
+    setDeletedSegmentIds((current) => (current.includes(segmentId) ? current : [...current, segmentId]));
+    setSegments((current) => current.filter((segment) => segment.id !== segmentId));
+    setActiveSegment(null);
+  };
+
   const onSegmentsReorder = (fromIndex: number, toIndex: number) => {
     const activeSegmentId = activeSegment !== null ? segments[activeSegment]?.id : null;
 
@@ -437,6 +472,42 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     });
   };
 
+  /** 영상에서 새 장면을 찾아 구간 목록 끝에 추가한다. 실패하면 화면에 보여 줄 문구를, 성공하면 null을 돌려준다. */
+  const onScenarioAdd = async (scenario: string): Promise<string | null> => {
+    if (!videoPath) return '서버에 올라간 분석 영상 정보가 없어서 장면을 더 찾을 수 없어요. 영상을 다시 올려 주세요.';
+
+    let found: FoundScenario | null;
+    try {
+      [found] = await findScenarios(videoPath, [scenario]);
+    } catch (error) {
+      return error instanceof ApiError ? error.message : '장면을 찾지 못했어요. 잠시 후 다시 시도해 주세요.';
+    }
+
+    if (!found) return `영상에서 “${scenario}” 장면을 찾지 못했어요. 다른 표현으로 다시 시도해 보세요.`;
+
+    const start = Math.max(0, found.start);
+    // 서버가 분석한 영상 길이 안으로 자른다(브라우저가 읽은 길이는 인코딩에 따라 조금 다를 수 있다).
+    const end = Math.min(duration, Math.max(found.end, start + 0.2));
+    if (segments.some((segment) => Math.abs(segment.start - start) < 0.5 && Math.abs(segment.end - end) < 0.5)) {
+      return '이미 목록에 있는 구간이에요.';
+    }
+
+    // 삭제했던 구간의 번호와 겹치지 않게 지금까지 쓴 가장 큰 번호 다음을 쓴다.
+    const usedIds = [...(analysis?.segments ?? []).map((item) => item.id), ...extraSegments.map((item) => item.id), ...segments.map((item) => item.id), ...deletedSegmentIds];
+    const id = Math.max(0, ...usedIds) + 1;
+    const added: EditorHighlightSegment = { id, sourceId: id, scenario, title: scenario, start, end };
+
+    // 지금까지의 구간 편집(자르기·순서)이 분석 결과로 덮이지 않도록 한 번은 자동 동기화를 건너뛴다.
+    skipSegmentSyncRef.current = true;
+    setExtraSegments((current) => [...current, added]);
+    setSegments((current) => [...current, added]);
+    setActiveSegment(segments.length);
+    setProgress(Math.min(1, Math.max(0, start / playbackDuration)));
+    setPlaying(false);
+    showExportToast('장면을 추가했어요');
+    return null;
+  };
+
   const syncVideoProgress = () => {
     const video = videoRef.current;
     if (!video || !Number.isFinite(video.duration) || video.duration <= 0) return;
@@ -448,7 +519,6 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     const video = videoRef.current;
     if (!video || !Number.isFinite(video.duration) || video.duration <= 0) return;
 
-    if (video.videoWidth > 0 && video.videoHeight > 0) setSourceRatio(video.videoWidth / video.videoHeight);
     video.muted = muted;
     setPlaybackDuration(video.duration);
     setProgress(Math.min(1, Math.max(0, video.currentTime / video.duration)));
@@ -626,6 +696,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     const id = subtitles.reduce((max, cue) => Math.max(max, cue.id), 0) + 1;
 
     setSubtitles((current) => [...current, { id, start, end, text: '' }].sort((a, b) => a.start - b.start));
+    setSubtitleTrackOpen(true);
     setSelectedCueId(id);
     setFocusCueId(id);
     setProgress(Math.min(1, Math.max(0, start / playbackDuration)));
@@ -740,7 +811,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
   // 편집 상태가 바뀔 때마다 이전 상태를 기록한다.
   useEffect(() => {
     const history = historyRef.current;
-    const snapshot: EditSnapshot = { deletedSegmentIds, segmentEditSettings, segments, subtitleSets, subtitleStyle };
+    const snapshot: EditSnapshot = { deletedSegmentIds, extraSegments, segmentEditSettings, segments, subtitleSets, subtitleStyle };
     const previous = history.present;
 
     history.present = snapshot;
@@ -761,17 +832,18 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     history.future = [];
     history.lastChange = now;
     setHistoryVersion((version) => version + 1);
-  }, [deletedSegmentIds, segmentEditSettings, segments, subtitleSets, subtitleStyle]);
+  }, [deletedSegmentIds, extraSegments, segmentEditSettings, segments, subtitleSets, subtitleStyle]);
 
   const applySnapshot = (target: EditSnapshot): boolean => {
     const history = historyRef.current;
     if (!history.present || !snapshotsDiffer(target, history.present)) return false;
 
-    if (target.deletedSegmentIds !== history.present.deletedSegmentIds) skipSegmentSyncRef.current = true;
+    if (target.deletedSegmentIds !== history.present.deletedSegmentIds || target.extraSegments !== history.present.extraSegments) skipSegmentSyncRef.current = true;
     history.applying = true;
     // 되돌리기·다시 실행 직후의 편집은 이전 편집과 묶이지 않고 새 기록이 되도록 한다.
     history.lastChange = 0;
     setDeletedSegmentIds(target.deletedSegmentIds);
+    setExtraSegments(target.extraSegments);
     setSegments(target.segments);
     setSegmentEditSettings(target.segmentEditSettings);
     setSubtitleSets(target.subtitleSets);
@@ -839,7 +911,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     setExportState('loading');
     try {
       const subtitleCues = exportWithSubtitles ? mapCuesToTimeline(subtitles, segments, segmentEditSettings, subtitleStyle.bilingual, subtitleStyle.showExtra) : [];
-      const blob = await requestExportVideo(videoPath, segments, segmentEditSettings, subtitleCues.length > 0 ? { cues: subtitleCues, style: subtitleStyle } : undefined, toExportAspect(aspect));
+      const blob = await requestExportVideo(videoPath, segments, segmentEditSettings, subtitleCues.length > 0 ? { cues: subtitleCues, style: subtitleStyle } : undefined);
       downloadExportedVideo(blob);
       setExportState('done');
       showExportToast('내보내기가 완료됐어요');
@@ -852,9 +924,9 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
   };
 
   // 채팅 편집 Agent 대화 한 줄기. 백엔드가 이 id로 이전 대화와 직전 편집을 기억한다.
-  const chatThreadRef = useRef<string>(crypto.randomUUID());
+  const chatThreadRef = useRef<string>(createId());
   const resetChatThread = () => {
-    chatThreadRef.current = crypto.randomUUID();
+    chatThreadRef.current = createId();
   };
 
   const applyLocalNaturalLanguageCommand = (command: string): NaturalLanguageCommandResult => {
@@ -927,117 +999,122 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     }
   };
 
-  // 가로·정사각형 화면은 폭이 있어야 커 보이므로 왼쪽(영상) 열을 넓힌다. 세로 화면은 높이가 꽉 차서 지금 폭으로 충분하다.
-  const wideFrame = (aspect === 'source' ? sourceRatio ?? 0 : getAspectRatio(aspect, null)) >= 1;
+  const clampPanelWidth = (value: number) => {
+    const rootWidth = rootRef.current?.getBoundingClientRect().width ?? 1200;
+    return Math.round(Math.max(PANEL_MIN, Math.min(value, PANEL_MAX, rootWidth * 0.55)));
+  };
+  const savePanelWidth = (value: number) => {
+    try {
+      localStorage.setItem(PANEL_STORAGE_KEY, String(value));
+    } catch {
+      // 저장소를 쓸 수 없어도 화면은 그대로 동작한다.
+    }
+  };
+  const startPanelResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const widthAt = (clientX: number) => clampPanelWidth((rootRef.current?.getBoundingClientRect().right ?? clientX) - clientX);
+    const onMove = (moveEvent: PointerEvent) => setPanelWidth(widthAt(moveEvent.clientX));
+    const onUp = (upEvent: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      savePanelWidth(widthAt(upEvent.clientX));
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const ghostButton =
+    'ed-pill ed-pill-ghost';
 
   return (
-    <div
-      className={`editor-shell grid h-screen w-full grid-rows-[52px_minmax(0,1fr)] overflow-hidden bg-white max-[1180px]:h-auto max-[1180px]:min-h-screen max-[1180px]:grid-cols-1 max-[1180px]:overflow-visible ${
-        assistantOpen
-          ? `${wideFrame ? 'grid-cols-[minmax(380px,1.4fr)_minmax(0,1.6fr)_320px]' : 'grid-cols-[minmax(300px,0.75fr)_minmax(0,1.6fr)_320px]'} max-[1180px]:grid-rows-[52px_minmax(520px,70vh)_auto_minmax(360px,auto)]`
-          : `${wideFrame ? 'grid-cols-[minmax(380px,1.4fr)_minmax(0,1.6fr)]' : 'grid-cols-[minmax(300px,0.75fr)_minmax(0,1.6fr)]'} max-[1180px]:grid-rows-[52px_minmax(520px,70vh)_auto]`
-      }`}
-    >
-      <header className="col-[1/-1] flex items-center gap-3.5 border-b border-[rgba(0,0,0,0.08)] px-8">
-        <button className="cursor-pointer border-0 bg-transparent p-0" onClick={onBack} type="button" aria-label="업로드 화면으로 돌아가기">
-          <Logo height={26} />
+    <div className="ed-root" ref={rootRef} style={{ '--ed-pw': `${panelWidth}px` } as CSSProperties}>
+      <header className="ed-top">
+        <button className="ed-ibtn" onClick={onBack} type="button" aria-label="이전 단계" title="이전 단계">
+          <Icon d={editorIcons.arrowLeft} size={15} strokeWidth={1.6} />
         </button>
-        <div className="h-4 w-px bg-[rgba(0,0,0,0.1)]" />
-        <div className="flex items-center gap-1.5">
-          <span className="text-[13px] text-[rgba(0,0,0,0.4)]">프로젝트:</span>
-          <span className="text-[13px] font-[480] tracking-[-0.1px]">{projectName ?? videoName ?? '하이라이트 편집'}</span>
-        </div>
-        <div className="flex-1" />
-        <div className="flex items-center gap-1.5">
-          <button
-            aria-label="되돌리기"
-            className="flex h-[30px] cursor-pointer items-center gap-1.5 rounded-lg border border-[rgba(0,0,0,0.12)] bg-white px-3 text-[12.5px] font-[500] text-black/70 hover:bg-black/[0.03] disabled:cursor-default disabled:opacity-35 disabled:hover:bg-white"
-            data-testid="undo-button"
-            disabled={!canUndo}
-            onClick={undo}
-            title="이전 편집으로 되돌리기 (⌘/Ctrl + Z)"
-            type="button"
-          >
-            ↶ 되돌리기
-          </button>
-          <button
-            aria-label="다시 실행"
-            className="flex h-[30px] w-[30px] cursor-pointer items-center justify-center rounded-lg border border-[rgba(0,0,0,0.12)] bg-white text-[14px] text-black/70 hover:bg-black/[0.03] disabled:cursor-default disabled:opacity-35 disabled:hover:bg-white"
-            data-testid="redo-button"
-            disabled={!canRedo}
-            onClick={redo}
-            title="되돌린 편집 다시 실행 (⌘/Ctrl + Shift + Z)"
-            type="button"
-          >
-            ↷
-          </button>
-        </div>
-        <PillButton variant="white" icon="history" small>
-          작업 기록
-        </PillButton>
+        <button className="cursor-pointer border-0 bg-transparent p-0" onClick={onBack} type="button" aria-label="업로드 화면으로 돌아가기">
+          <Logo height={24} />
+        </button>
+        <div className="ed-sep" />
+        <span className="ed-pname" title={projectName ?? videoName ?? '하이라이트 편집'}>
+          {projectName ?? videoName ?? '하이라이트 편집'}
+        </span>
+        <div style={{ flex: 1 }} />
+        <button aria-label="되돌리기" className="ed-ibtn" data-testid="undo-button" disabled={!canUndo} onClick={undo} title="이전 편집으로 되돌리기 (⌘/Ctrl + Z)" type="button">
+          <Icon d={editorIcons.undo} size={15} strokeWidth={1.6} />
+        </button>
+        <button aria-label="다시 실행" className="ed-ibtn" data-testid="redo-button" disabled={!canRedo} onClick={redo} title="되돌린 편집 다시 실행 (⌘/Ctrl + Shift + Z)" type="button">
+          <Icon d={editorIcons.redo} size={15} strokeWidth={1.6} />
+        </button>
+        {/* TODO: 작업 기록 버튼은 지금 사용하지 않아 주석 처리함. 나중에 기능(작업 기록 목록/복원)을 구현할 때 다시 살려야 함.
+        <button className={ghostButton} title="작업 기록" type="button">
+          <Icon d={icons.history} size={14} strokeWidth={1.6} />
+          <span className="ed-lbl-h">작업 기록</span>
+        </button>
+        */}
         <button
           aria-expanded={assistantOpen}
           aria-label={assistantOpen ? 'AI 어시스턴트 닫기' : 'AI 어시스턴트 열기'}
-          className={`flex h-[30px] cursor-pointer items-center gap-1.5 rounded-lg border px-3 text-[12.5px] font-[500] ${assistantOpen ? 'border-transparent text-white' : 'border-[rgba(0,0,0,0.12)] bg-white text-black/70 hover:bg-black/[0.03]'}`}
+          className={ghostButton}
           data-testid="assistant-toggle"
           onClick={() => setAssistantOpen((open) => !open)}
-          style={assistantOpen ? { background: accent } : undefined}
+          style={assistantOpen ? { background: `${accent}14`, color: accent, boxShadow: `0 0 0 1px ${accent}55` } : undefined}
           type="button"
         >
-          <Icon d={icons.bot} size={13} stroke={assistantOpen ? '#fff' : 'rgba(0,0,0,0.6)'} />
-          AI 어시스턴트
+          <Icon d={icons.sparkles} size={14} strokeWidth={1.6} />
+          <span className="ed-lbl">AI 어시스턴트</span>
         </button>
         {subtitles.length > 0 && (
-          <label className="flex cursor-pointer items-center gap-1.5 text-[12.5px] text-[rgba(0,0,0,0.65)]">
+          <label className="flex flex-none cursor-pointer items-center gap-1.5 text-[12.5px] whitespace-nowrap text-[rgba(0,0,0,0.65)]">
             <input checked={exportWithSubtitles} onChange={(event) => setExportWithSubtitles(event.target.checked)} type="checkbox" />
             자막 포함
           </label>
         )}
-        <PillButton
-          variant="accent"
-          disabled={!videoPath || segments.length === 0}
-          icon={exportState === 'done' ? 'check' : 'download'}
-          loading={exportState === 'loading'}
-          small
+        <button
+          className="ed-pill"
+          disabled={!videoPath || segments.length === 0 || exportState === 'loading'}
           onClick={onExport}
-          style={{ transition: 'all 0.3s' }}
+          style={{ background: accent, color: '#fff' }}
+          type="button"
         >
-          {exportState === 'loading' ? '내보내는 중...' : exportState === 'done' ? '완료!' : 'MP4로 내보내기'}
-        </PillButton>
+          <Icon d={exportState === 'done' ? icons.check : icons.download} size={14} strokeWidth={1.6} />
+          <span>
+            {exportState === 'loading' ? (
+              '내보내는 중…'
+            ) : exportState === 'done' ? (
+              '완료!'
+            ) : (
+              <>
+                <span className="ed-lbl-full">MP4로 </span>내보내기
+              </>
+            )}
+          </span>
+        </button>
       </header>
 
-      <main className="flex min-h-0 flex-col overflow-hidden px-8 py-6">
-        <div className="mb-3 flex shrink-0 items-center justify-center gap-1.5" data-testid="aspect-select" role="group" aria-label="화면 비율">
-          {ASPECT_OPTIONS.map((option) => (
-            <button
-              aria-pressed={aspect === option.value}
-              className={`cursor-pointer rounded-lg border px-2.5 py-1 text-[12px] transition-colors ${
-                aspect === option.value ? 'border-[#5b4bff] bg-[#5b4bff]/10 font-semibold text-[#5b4bff]' : 'border-black/[0.1] bg-transparent text-[rgba(0,0,0,0.55)] hover:bg-black/[0.04]'
-              }`}
-              data-testid={`aspect-${option.value}`}
-              key={option.value}
-              onClick={() => setAspect(option.value)}
-              type="button"
-            >
-              {option.label}
-            </button>
-          ))}
+      <main className="ed-stage">
+        <div className="ed-vwrap">
+          <VideoPreview
+            aspect="source"
+            videoRef={videoRef}
+            videoUrl={videoUrl}
+            onEnded={() => setPlaying(false)}
+            onLoadedMetadata={syncVideoMetadata}
+            onTimeUpdate={syncVideoProgress}
+            draggable={Boolean(activeCue && activeCue.id === selectedCueId)}
+            onCueDrop={onCueDropOnScreen}
+            onSubtitleMove={(position) => activeCue && onCuePositionChange(activeCue.id, position)}
+            onSubtitleResize={(size) => activeCue && onCueSizeChange(activeCue.id, size)}
+            subtitleLines={activeCue ? getCueLines(activeCue, subtitleStyle.bilingual, subtitleStyle.showExtra) : undefined}
+            subtitlePosition={activeCue ? { x: activeCue.x, y: activeCue.y } : undefined}
+            subtitleStyle={resolveCueStyle(activeCue, subtitleStyle)}
+          />
         </div>
-        <VideoPreview
-          aspect={aspect}
-          videoRef={videoRef}
-          videoUrl={videoUrl}
-          onEnded={() => setPlaying(false)}
-          onLoadedMetadata={syncVideoMetadata}
-          onTimeUpdate={syncVideoProgress}
-          draggable={Boolean(activeCue && activeCue.id === selectedCueId)}
-          onCueDrop={onCueDropOnScreen}
-          onSubtitleMove={(position) => activeCue && onCuePositionChange(activeCue.id, position)}
-          onSubtitleResize={(size) => activeCue && onCueSizeChange(activeCue.id, size)}
-          subtitleLines={activeCue ? getCueLines(activeCue, subtitleStyle.bilingual, subtitleStyle.showExtra) : undefined}
-          subtitlePosition={activeCue ? { x: activeCue.x, y: activeCue.y } : undefined}
-          subtitleStyle={resolveCueStyle(activeCue, subtitleStyle)}
-        />
         <PlayerControls
           accent={accent}
           dragging={dragging}
@@ -1054,7 +1131,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
         />
       </main>
 
-      <section className={`flex min-h-0 flex-col overflow-hidden py-5 pl-4 ${assistantOpen ? 'pr-6' : 'pr-10'}`}>
+      <section className="ed-tl">
         <WaveformTimeline
           accent={accent}
           duration={duration}
@@ -1062,10 +1139,17 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
           onCueAdd={onCueAdd}
           onCueDrop={onCueDropOnTimeline}
           onCueMove={onCueMove}
-          onCueSelect={setSelectedCueId}
+          onCueSelect={(cueId) => {
+            setSelectedCueId(cueId);
+            setTab('subs');
+          }}
           selectedCueId={selectedCueId}
           onCueTimeChange={onCueTimeChange}
           onSegmentChange={onSegmentChange}
+          onSegmentPick={onSegmentClick}
+          activeSegmentId={activeSegment !== null ? segments[activeSegment]?.id ?? null : null}
+          subtitleTrackOpen={subtitleTrackOpen}
+          onSubtitleTrackToggle={() => setSubtitleTrackOpen((open) => !open)}
           progress={progress}
           segments={segments}
           setPlaying={setPlaying}
@@ -1073,58 +1157,117 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
           subtitleCues={subtitles}
           waveHeights={waveHeights}
         />
-        <HighlightList
-          activeSegment={activeSegment}
-          onSegmentClick={onSegmentClick}
-          onSegmentsReorder={onSegmentsReorder}
-          segmentEditSettings={segmentEditSettings}
-          segments={segments}
-          thumbnails={segmentThumbnails}
-        />
-        <SubtitlePanel
-          activeClip={activeSegment !== null && segments[activeSegment] ? { end: segments[activeSegment].end, index: activeSegment, start: segments[activeSegment].start } : null}
-          activeSet={subtitleSets.active}
-          cues={subtitles}
-          extraBusy={extraBusy}
-          focusCueId={focusCueId}
-          onAddExtraLanguage={onAddExtraLanguage}
-          onRemoveExtraLanguage={onRemoveExtraLanguage}
-          onActiveSetChange={onActiveSetChange}
-          onCueAdd={() => onCueAdd()}
-          onCueFitToClip={onCueFitToClip}
-          onDeleteOutside={onDeleteCuesOutsideSegments}
-          onFocusHandled={() => setFocusCueId(null)}
-          segmentRanges={segments.map((segment) => ({ start: segment.start, end: segment.end }))}
-          scenarioCount={subtitleSets.scenario.length}
-          voiceCount={subtitleSets.voice.length}
-          disabled={!videoPath}
-          error={subtitleError}
-          generating={subtitleGenerating}
-          language={subtitleLanguage}
-          notice={subtitleNotice}
-          onCueChange={onCueChange}
-          onCueDelete={onCueDelete}
-          onCuePatch={onCuePatch}
-          onCueStyleReset={onCueStyleReset}
-          onCueTimeChange={onCueTimeChange}
-          onCueSelect={onCueSelect}
-          onDownload={onDownloadSrt}
-          onGenerate={onGenerateSubtitles}
-          onLanguageChange={setSubtitleLanguage}
-          onStyleChange={setSubtitleStyle}
-          onSuggest={onSuggestSubtitles}
-          onTranslateChange={setSubtitleTranslate}
-          progress={subtitleProgress}
-          selectedCueId={selectedCueId}
-          style={subtitleStyle}
-          suggestDisabled={segments.length === 0}
-          suggesting={suggesting}
-          translate={subtitleTranslate}
-        />
       </section>
 
-      {/* 대화 기록이 사라지지 않도록 닫아도 화면에서만 숨긴다. */}
-      <div className={`min-h-0 flex-col border-l border-[rgba(0,0,0,0.08)] max-[1180px]:border-t max-[1180px]:border-l-0 ${assistantOpen ? 'flex' : 'hidden'}`}>
+      <aside className="ed-panel">
+        <div
+          aria-label="패널 너비 조절 (←/→, 더블클릭으로 초기화)"
+          aria-orientation="vertical"
+          aria-valuemax={PANEL_MAX}
+          aria-valuemin={PANEL_MIN}
+          aria-valuenow={panelWidth}
+          className="ed-resize"
+          onDoubleClick={() => {
+            setPanelWidth(PANEL_DEFAULT);
+            savePanelWidth(PANEL_DEFAULT);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            event.preventDefault();
+            const next = clampPanelWidth(panelWidth + (event.key === 'ArrowLeft' ? 16 : -16));
+            setPanelWidth(next);
+            savePanelWidth(next);
+          }}
+          onPointerDown={startPanelResize}
+          role="separator"
+          tabIndex={0}
+        />
+        <div className="flex-none px-4 pt-3">
+          <div className="flex gap-0.5 rounded-full bg-black/5 p-[3px]" role="tablist">
+            {(
+              [
+                ['scenes', '시나리오', segments.length],
+                ['subs', '자막', subtitles.length],
+              ] as const
+            ).map(([id, label, count]) => (
+              <button
+                aria-selected={tab === id}
+                className="inline-flex h-[30px] flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full border-0 text-[13px] font-[520] whitespace-nowrap"
+                data-testid={`editor-tab-${id}`}
+                key={id}
+                onClick={() => setTab(id)}
+                role="tab"
+                style={{ background: tab === id ? '#fff' : 'transparent', boxShadow: tab === id ? '0 1px 3px rgba(0,0,0,0.12)' : 'none', color: tab === id ? '#000' : 'rgba(0,0,0,0.5)' }}
+                type="button"
+              >
+                {label}
+                <span className="font-mono text-[11px] opacity-55">{count}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {tab === 'scenes' ? (
+          <>
+            <HighlightList
+              activeSegment={activeSegment}
+              currentTime={currentTime}
+              onSegmentClick={onSegmentClick}
+              onSegmentDelete={onSegmentDelete}
+              onSegmentsReorder={onSegmentsReorder}
+              segmentEditSettings={segmentEditSettings}
+              segments={segments}
+              thumbnails={segmentThumbnails}
+            />
+            <ScenarioAddBar accent={accent} onAdd={onScenarioAdd} />
+          </>
+        ) : (
+          <SubtitlePanel
+            activeClip={activeSegment !== null && segments[activeSegment] ? { end: segments[activeSegment].end, index: activeSegment, start: segments[activeSegment].start } : null}
+            activeSet={subtitleSets.active}
+            cues={subtitles}
+            extraBusy={extraBusy}
+            focusCueId={focusCueId}
+            onAddExtraLanguage={onAddExtraLanguage}
+            onRemoveExtraLanguage={onRemoveExtraLanguage}
+            onActiveSetChange={onActiveSetChange}
+            onCueAdd={() => onCueAdd()}
+            onCueFitToClip={onCueFitToClip}
+            onDeleteOutside={onDeleteCuesOutsideSegments}
+            onFocusHandled={() => setFocusCueId(null)}
+            segmentRanges={segments.map((segment) => ({ start: segment.start, end: segment.end }))}
+            scenarioCount={subtitleSets.scenario.length}
+            voiceCount={subtitleSets.voice.length}
+            disabled={!videoPath}
+            error={subtitleError}
+            generating={subtitleGenerating}
+            language={subtitleLanguage}
+            notice={subtitleNotice}
+            onCueChange={onCueChange}
+            onCueDelete={onCueDelete}
+            onCuePatch={onCuePatch}
+            onCueStyleReset={onCueStyleReset}
+            onCueTimeChange={onCueTimeChange}
+            onCueSelect={onCueSelect}
+            onDownload={onDownloadSrt}
+            onGenerate={onGenerateSubtitles}
+            onLanguageChange={setSubtitleLanguage}
+            onStyleChange={setSubtitleStyle}
+            onSuggest={onSuggestSubtitles}
+            onTranslateChange={setSubtitleTranslate}
+            progress={subtitleProgress}
+            selectedCueId={selectedCueId}
+            style={subtitleStyle}
+            suggestDisabled={segments.length === 0}
+            suggesting={suggesting}
+            translate={subtitleTranslate}
+          />
+        )}
+      </aside>
+
+      {/* AI 어시스턴트는 필요할 때만 오른쪽에서 밀려 나오는 서랍. 닫아도 대화 기록이 사라지지 않도록 화면에서만 숨긴다. */}
+      {assistantOpen && <div className="fixed inset-0 z-[70] bg-black/[0.12]" onClick={() => setAssistantOpen(false)} />}
+      <div aria-hidden={!assistantOpen} className="ed-drawer" data-open={assistantOpen ? 1 : 0} data-testid="assistant-drawer">
         <AiAssistant accent={accent} onApplyCommand={applyNaturalLanguageCommand} onReset={resetChatThread} onClose={() => setAssistantOpen(false)} />
       </div>
 

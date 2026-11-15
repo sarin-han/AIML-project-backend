@@ -42,7 +42,7 @@ export function loadVideoDuration(objectUrl: string): Promise<number> {
   });
 }
 
-export function captureVideoThumbnail(objectUrl: string, duration: number): Promise<string> {
+export function captureVideoThumbnail(objectUrl: string, duration: number, atSeconds?: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     const canvas = document.createElement('canvas');
@@ -57,7 +57,7 @@ export function captureVideoThumbnail(objectUrl: string, duration: number): Prom
       video.load();
     };
 
-    const seekTime = getThumbnailSeekTime(duration);
+    const seekTime = atSeconds !== undefined && Number.isFinite(atSeconds) ? Math.max(0, atSeconds) : getThumbnailSeekTime(duration);
     const captureFrame = () => {
       if (settled) return;
 

@@ -50,6 +50,7 @@ async def start_analyze_job(
     video: UploadFile = File(...),
     project_name: str = Form(...),
     scenarios: str = Form(...),
+    known_segments: str | None = Form(None),
 ):
     files = {
         "video": (
@@ -65,9 +66,24 @@ async def start_analyze_job(
         scenario_list = json.loads(scenarios)
     except ValueError:
         scenario_list = []
-    queries_en = await scenarios_to_english(scenario_list) if isinstance(scenario_list, list) else None
-    if queries_en:
-        data["queries_en"] = json.dumps(queries_en, ensure_ascii=False)
+    # 추천으로 받은 장면은 이미 구간 시간(known_segments)을 알고 있어서 다시 찾지 않는다. 번역도 찾을 장면만 한다.
+    known: list = []
+    if known_segments:
+        try:
+            parsed = json.loads(known_segments)
+            known = parsed if isinstance(parsed, list) else []
+        except ValueError:
+            known = []
+        data["known_segments"] = json.dumps(known, ensure_ascii=False)
+
+    if isinstance(scenario_list, list):
+        to_find = [index for index in range(len(scenario_list)) if index >= len(known) or not known[index]]
+        translated = await scenarios_to_english([scenario_list[index] for index in to_find]) if to_find else []
+        if translated and len(translated) == len(to_find):
+            queries_en = list(scenario_list)
+            for index, query in zip(to_find, translated):
+                queries_en[index] = query
+            data["queries_en"] = json.dumps(queries_en, ensure_ascii=False)
 
     async with httpx.AsyncClient(timeout=None) as client:
         response = await client.post(f"{GPU_SERVER_URL}/analyze/jobs", files=files, data=data)
@@ -80,6 +96,73 @@ async def start_analyze_job(
 async def get_analyze_job(job_id: str):
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(f"{GPU_SERVER_URL}/analyze/jobs/{job_id}")
+
+    raise_upstream_error(response)
+    return response.json()
+
+
+async def project_title_en(project_name: str | None) -> str | None:
+    """하이라이트 점수의 기준이 되는 영상 제목. 모델이 영어를 기대해서 프로젝트 이름을 영어로 바꿔 보낸다."""
+    name = (project_name or "").strip()
+    if not name:
+        return None
+    translated = await scenarios_to_english([name])
+    return translated[0] if translated else None
+
+
+async def forward_video(path: str, video: UploadFile, data: dict) -> httpx.Response:
+    files = {"video": (video.filename or "video.mp4", await video.read(), video.content_type or "application/octet-stream")}
+    async with httpx.AsyncClient(timeout=None) as client:
+        return await client.post(f"{GPU_SERVER_URL}{path}", files=files, data=data)
+
+
+@app.post("/recommend")
+async def recommend_scenes(video: UploadFile = File(...), project_name: str | None = Form(None)):
+    """영상을 보고 찾아볼 만한 장면을 추천한다. 검색은 하지 않는다."""
+    data = {}
+    if title_en := await project_title_en(project_name):
+        data["title_en"] = title_en
+
+    response = await forward_video("/recommend", video, data)
+    raise_upstream_error(response)
+    return response.json()
+
+
+@app.post("/highlights/jobs")
+async def start_highlight_job(video: UploadFile = File(...), project_name: str = Form(...)):
+    """시나리오 없이 영상 전체 길이에서 하이라이트 구간을 찾는 작업을 시작한다."""
+    data = {"project_name": project_name}
+    if title_en := await project_title_en(project_name):
+        data["title_en"] = title_en
+
+    response = await forward_video("/highlights/jobs", video, data)
+    raise_upstream_error(response)
+    return response.json()
+
+
+@app.get("/highlights/jobs/{job_id}")
+async def get_highlight_job(job_id: str):
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(f"{GPU_SERVER_URL}/highlights/jobs/{job_id}")
+
+    raise_upstream_error(response)
+    return response.json()
+
+
+class ScenarioFindBody(BaseModel):
+    video_path: str
+    scenarios: list[str]
+
+
+@app.post("/analyze/scenarios")
+async def find_scenarios(body: ScenarioFindBody):
+    """편집 화면에서 시나리오를 더 추가할 때: 이미 올라간 영상에서 새 장면만 찾는다."""
+    data: dict = {"video_path": body.video_path, "scenarios": body.scenarios}
+    if queries_en := await scenarios_to_english(body.scenarios):
+        data["queries_en"] = queries_en
+
+    async with httpx.AsyncClient(timeout=None) as client:
+        response = await client.post(f"{GPU_SERVER_URL}/analyze/scenarios", json=data)
 
     raise_upstream_error(response)
     return response.json()

@@ -79,6 +79,10 @@ export async function startAnalyzeJob(file: File, scenarios: ScenarioItem[], pro
   formData.append('project_name', buildProjectName(file, projectName));
   formData.append('scenarios', JSON.stringify(scenarios.map((item) => item.ko)));
 
+  // 추천으로 받은 장면은 구간을 이미 알고 있으니 서버가 다시 찾지 않게 시간을 같이 보낸다.
+  const known = scenarios.map((item) => (item.rec && item.start !== undefined && item.end !== undefined ? { start: item.start, end: item.end } : null));
+  if (known.some(Boolean)) formData.append('known_segments', JSON.stringify(known));
+
   return requestJson<AnalyzeJobStartResponse>(endpoint, {
     method: 'POST',
     body: formData,

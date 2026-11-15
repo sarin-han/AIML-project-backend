@@ -1,29 +1,43 @@
-import { useState } from 'react';
-import type { DragEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { DragEvent, KeyboardEvent } from 'react';
 import type { HighlightListProps } from '@/types/pages/EditorScreen';
 
 function formatTime(seconds: number): string {
   const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.round(seconds)) : 0;
   const minutes = Math.floor(safeSeconds / 60);
   const rest = safeSeconds % 60;
-  return `${minutes}:${String(rest).padStart(2, '0')}`;
+  return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
 }
+
+/** 구간 색은 목록 순서가 아니라 구간 id를 따라 3색이 돈다(순서를 바꿔도 색은 그대로). */
+const SEGMENT_COLORS = ['#F59E0B', '#10B981', '#EF4444'];
 
 function DragHandle() {
   return (
-    <svg aria-hidden="true" width="12" height="18" viewBox="0 0 12 18" fill="none">
-      {[3, 9].flatMap((x) =>
-        [4, 9, 14].map((y) => (
-          <circle key={`${x}-${y}`} cx={x} cy={y} r={1.15} fill="currentColor" />
-        )),
-      )}
+    <svg aria-hidden="true" width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
+      {[3, 8, 13].map((y) => (
+        <g key={y}>
+          <circle cx="2.5" cy={y} r="1.3" />
+          <circle cx="7.5" cy={y} r="1.3" />
+        </g>
+      ))}
     </svg>
   );
 }
 
-export default function HighlightList({ activeSegment, onSegmentClick, onSegmentsReorder, segmentEditSettings, segments, thumbnails }: HighlightListProps) {
+export default function HighlightList({ activeSegment, currentTime, onSegmentClick, onSegmentDelete, onSegmentsReorder, segmentEditSettings, segments, thumbnails }: HighlightListProps) {
   const [draggingSegmentId, setDraggingSegmentId] = useState<number | null>(null);
   const [hoverSegmentId, setHoverSegmentId] = useState<number | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const previousCount = useRef(segments.length);
+
+  // 새 시나리오가 목록 끝에 추가되면 목록 맨 아래로 스크롤한다.
+  useEffect(() => {
+    if (segments.length > previousCount.current && listRef.current) {
+      listRef.current.scrollTo({ top: listRef.current.scrollHeight });
+    }
+    previousCount.current = segments.length;
+  }, [segments.length]);
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>, segmentId: number) => {
     event.dataTransfer.effectAllowed = 'move';
@@ -56,78 +70,112 @@ export default function HighlightList({ activeSegment, onSegmentClick, onSegment
     setHoverSegmentId(null);
   };
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>, index: number) => {
+    if (event.target !== event.currentTarget) return;
+
+    if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      event.preventDefault();
+      onSegmentsReorder(index, index + (event.key === 'ArrowUp' ? -1 : 1));
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onSegmentClick(index);
+    }
+  };
+
+  const playingIndex = segments.findIndex((segment) => currentTime >= segment.start && currentTime < segment.end);
+
   return (
-    <div className="flex flex-1 flex-col gap-2.5 overflow-y-auto px-5 py-4">
+    <div className="ed-list" ref={listRef}>
+      {segments.length > 1 && <div className="flex-none px-0.5 pb-0.5 text-[11px] text-black/40">드래그해서 순서를 바꿔요 · 위에서부터 차례로 이어 붙여요</div>}
+      {segments.length === 0 && (
+        <div className="m-auto text-center text-[13px] leading-[1.6] text-black/40">
+          시나리오가 없어요.
+          <br />
+          아래에서 찾고 싶은 장면을 입력해 보세요.
+        </div>
+      )}
       {segments.map((segment, index) => {
-        const tints = ['#FFF8F0', '#F0FFF6', '#FFF0F0'];
-        const borders = ['#F59E0B', '#10B981', '#EF4444'];
-        const tint = tints[index % tints.length];
-        const border = borders[index % borders.length];
-        const isActive = activeSegment === index;
+        const color = SEGMENT_COLORS[(segment.id - 1 + SEGMENT_COLORS.length * 1000) % SEGMENT_COLORS.length];
+        const isActive = activeSegment === index || playingIndex === index;
         const editSetting = segmentEditSettings.find((setting) => setting.segmentId === segment.id);
         const hasEditBadge = Boolean(editSetting && (editSetting.speed !== 1 || editSetting.muted));
         const scoreLabel = typeof segment.score === 'number' ? `${Math.round(segment.score * 100)}%` : null;
         const isDragging = draggingSegmentId === segment.id;
         const isDragTarget = hoverSegmentId === segment.id && draggingSegmentId !== segment.id;
+        const title = segment.title ?? segment.scenario;
 
         return (
           <div
+            aria-label={`${index + 1}번 ${title}. Alt+위/아래 화살표로 순서 변경`}
+            className="ed-row"
             data-active={isActive ? 'true' : 'false'}
             data-testid="result-card"
             draggable
             key={`${segment.sourceId}-${segment.id}-${segment.scenario}-${segment.start}`}
+            onClick={() => onSegmentClick(index)}
             onDragEnd={stopDragging}
             onDragOver={(event) => handleDragOver(event, segment.id)}
             onDragStart={(event) => handleDragStart(event, segment.id)}
             onDrop={(event) => handleDrop(event, index)}
-            onClick={() => onSegmentClick(index)}
-            onMouseEnter={(event) => {
-              event.currentTarget.style.borderColor = border;
-            }}
-            onMouseLeave={(event) => {
-              event.currentTarget.style.borderColor = isActive || isDragTarget ? border : 'rgba(0,0,0,0.08)';
-            }}
-            className="flex cursor-grab items-center overflow-hidden rounded-[10px] transition-all active:cursor-grabbing"
+            onKeyDown={(event) => handleKeyDown(event, index)}
+            role="button"
             style={{
-              border: `1px solid ${isActive || isDragTarget ? border : 'rgba(0,0,0,0.08)'}`,
-              boxShadow: isActive || isDragTarget ? `0 2px 12px ${border}44` : 'none',
-              opacity: isDragging ? 0.45 : 1,
-              transform: isActive || isDragTarget ? 'scale(1.01)' : 'scale(1)',
+              background: isActive ? `${color}0f` : '#fff',
+              borderColor: isActive ? color : undefined,
+              boxShadow: isDragTarget ? '0 -2px 0 0 #5b4cf5' : 'none',
+              opacity: isDragging ? 0.4 : 1,
             }}
+            tabIndex={0}
           >
-            <div className="flex w-8 shrink-0 items-center justify-center self-stretch bg-white text-black/20 transition-colors hover:text-black/45" aria-label="순서 변경 핸들">
+            <span aria-hidden="true" className="ed-grip">
               <DragHandle />
+            </span>
+            <span className="w-1 flex-none self-stretch rounded-sm" style={{ background: color }} />
+            <div className="relative h-9 w-14 flex-none overflow-hidden rounded-md bg-[#1a0800]">
+              {thumbnails[segment.id] ? <img alt="" className="absolute inset-0 h-full w-full object-cover" src={thumbnails[segment.id]} /> : <span className="absolute inset-0 flex items-center justify-center font-mono text-[7px] text-white/25">클립</span>}
             </div>
-            <div className="relative flex w-[72px] shrink-0 self-stretch items-center justify-center overflow-hidden bg-[repeating-linear-gradient(135deg,#1a0800_0px,#1a0800_4px,#2a1200_4px,#2a1200_8px)]">
-              {thumbnails[segment.id] ? (
-                <img className="absolute inset-0 h-full w-full object-cover" src={thumbnails[segment.id]} alt="" />
-              ) : (
-                <span className="font-mono text-[7px] text-white/20">클립</span>
-              )}
-              <div className="absolute top-0 bottom-0 left-0 w-[3px]" style={{ background: border }} />
-            </div>
-            <div className="flex-1 px-3.5 py-2.5" style={{ background: tint }}>
-              <div className="mb-1 flex items-center gap-[7px]">
-                <span className="flex h-[17px] w-[17px] shrink-0 items-center justify-center rounded-full font-mono text-[8px] font-bold text-white" style={{ background: border }}>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="flex h-4 w-4 flex-none items-center justify-center rounded-full font-mono text-[9px] font-bold text-white" style={{ background: color }}>
                   {index + 1}
                 </span>
-                <span className="text-[13px] font-[480] tracking-[-0.1px]">{segment.title ?? segment.scenario}</span>
+                <span className="truncate text-[13px] font-[480] tracking-[-0.1px]" title={title}>
+                  {title}
+                </span>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span data-testid="result-start-time" className="font-mono text-[11px] text-[rgba(0,0,0,0.38)]">{formatTime(segment.start)}</span>
-                <span className="font-mono text-[11px] text-[rgba(0,0,0,0.24)]">-</span>
-                <span data-testid="result-end-time" className="font-mono text-[11px] text-[rgba(0,0,0,0.38)]">{formatTime(segment.end)}</span>
-                {scoreLabel && <span data-testid="result-score" className="font-mono text-[11px] text-[rgba(0,0,0,0.38)]">score {scoreLabel}</span>}
+              <div className="mt-[3px] flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-mono text-[11px] whitespace-nowrap text-black/[0.42]">
+                <span>
+                  <span data-testid="result-start-time">{formatTime(segment.start)}</span> – <span data-testid="result-end-time">{formatTime(segment.end)}</span>
+                </span>
+                {scoreLabel && <span data-testid="result-score">score {scoreLabel}</span>}
                 {hasEditBadge && editSetting?.speed !== 1 && (
-                  <span data-testid="playback-rate-indicator" className="rounded-full px-1.5 py-[1px] font-mono text-[9px] font-semibold" style={{ background: `${border}18`, color: border }}>
+                  <span data-testid="playback-rate-indicator" className="rounded-full px-1.5 py-[1px] text-[9px] font-semibold" style={{ background: `${color}18`, color }}>
                     {editSetting?.speed}배속
                   </span>
                 )}
                 {hasEditBadge && editSetting?.muted && (
-                  <span data-testid="mute-indicator" className="rounded-full bg-black/8 px-1.5 py-[1px] font-mono text-[9px] font-semibold text-black/55">음소거</span>
+                  <span data-testid="mute-indicator" className="rounded-full bg-black/8 px-1.5 py-[1px] text-[9px] font-semibold text-black/55">
+                    음소거
+                  </span>
                 )}
               </div>
             </div>
+            <button
+              aria-label={`${title} 삭제`}
+              className="ed-rm ed-ibtn"
+              data-testid="result-delete"
+              onClick={(event) => {
+                event.stopPropagation();
+                onSegmentDelete(segment.id);
+              }}
+              style={{ height: 24, width: 24 }}
+              title="삭제"
+              type="button"
+            >
+              <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         );
       })}

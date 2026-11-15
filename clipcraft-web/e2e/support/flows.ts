@@ -32,10 +32,11 @@ export async function uploadSampleVideo(page: Page) {
 
 export async function addScenarios(page: Page) {
   const input = page.getByTestId('scenario-input');
-  for (const scenario of scenarios) {
+  for (const [index, scenario] of scenarios.entries()) {
     await input.fill(scenario);
     await page.getByTestId('add-scenario-button').click();
-    await expect(page.getByText(scenario)).toBeVisible();
+    // 장면은 바로 고칠 수 있는 입력칸으로 보여 주므로 글자가 아니라 입력 값으로 확인한다.
+    await expect(page.getByTestId('scenario-item-input').nth(index)).toHaveValue(scenario);
   }
 }
 

@@ -20,24 +20,15 @@ from fastapi.middleware.cors import CORSMiddleware
 # GPU 서비스 루트 경로를 시스템 경로에 추가합니다.
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = current_dir
-clip_search_dir = os.path.join(project_root, "clip_search")
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-if clip_search_dir not in sys.path:
-    sys.path.insert(0, clip_search_dir)
 
 app = FastAPI()
-verifier = None
-verifier_lock = threading.Lock()
 
-def get_verifier():
-    global verifier
-    if verifier is None:
-        with verifier_lock:
-            if verifier is None:
-                from vllava.vllava import VideoLLaVAVerifier
-                verifier = VideoLLaVAVerifier()
-    return verifier
+class ReVisionUnavailableError(RuntimeError):
+    """ReVision 서비스(8002)에 연결할 수 없을 때 발생한다. 분석을 시작하지 않는다."""
+
+REVISION_UNAVAILABLE_MESSAGE = "분석 서버(ReVision)가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요."
 
 def get_ffmpeg_paths():
     ffmpeg = shutil.which("ffmpeg")
@@ -67,6 +58,8 @@ class AnalysisRequest(BaseModel):
     scenarios: List[str]
     # ReVision은 영어 질문 기준이다. scenarios와 같은 순서·길이의 영어 문장(백엔드가 번역해서 보냄).
     queries_en: Optional[List[str]] = None
+    # scenarios와 같은 순서. 이미 구간을 아는 장면(추천으로 받은 것)은 {"start","end"}, 찾아야 하는 장면은 null.
+    known_segments: Optional[List[Optional[dict]]] = None
 
 class ExportSegment(BaseModel):
     start: float
@@ -277,40 +270,6 @@ ANALYSIS_STEPS = [
 analysis_jobs: dict[str, dict] = {}
 analysis_jobs_lock = threading.Lock()
 
-def get_local_clip_search_config():
-    return {
-        "fps": float(os.environ.get("CLIP_SEARCH_FPS", "0.5")),
-        "batch_size": int(os.environ.get("CLIP_SEARCH_BATCH_SIZE", "32")),
-        "clip_model": os.environ.get("CLIP_SEARCH_MODEL", "ViT-L/14"),
-        "output_root": os.environ.get(
-            "CLIP_SEARCH_OUTPUT_ROOT",
-            os.path.join(project_root, "clip_search", "clips"),
-        ),
-    }
-
-def run_local_clip_search(
-    video_path: str,
-    query: str,
-    project_name: str,
-    scenario_folder_name: str,
-) -> dict:
-    config = get_local_clip_search_config()
-    safe_project = make_safe_name(project_name)
-    output_dir = os.path.join(
-        config["output_root"],
-        safe_project,
-        scenario_folder_name,
-    )
-    from pipeline import run_pipeline as run_clip_search_pipeline
-    return run_clip_search_pipeline(
-        video_path=video_path,
-        query=query,
-        output_dir=output_dir,
-        fps=config["fps"],
-        batch_size=config["batch_size"],
-        clip_model=config["clip_model"],
-    )
-
 def make_safe_name(name: str):
     clean_name = re.sub(r'[\\/:*?"<>|]', "", name).strip().replace(" ", "_")
     return clean_name
@@ -320,6 +279,9 @@ def update_job(job_id: str, **updates):
         job = analysis_jobs.get(job_id)
         if not job:
             return
+        # 진행률은 뒤로 가지 않는다(단계마다 다른 기준으로 갱신해도 막대가 줄어들지 않게).
+        if "progress" in updates and updates.get("status") != "error":
+            updates["progress"] = max(int(updates["progress"]), int(job.get("progress", 0)))
         job.update(updates)
         job["updated_at"] = time.time()
 
@@ -330,6 +292,42 @@ def add_job_log(job_id: str, message: str):
             return
         job["logs"] = [*job.get("logs", []), message]
         job["updated_at"] = time.time()
+
+def watch_revision_progress(request_id: str, apply) -> threading.Event:
+    """ReVision 서비스가 요청을 처리하는 동안 실제 진행 상태를 주기적으로 읽어 apply(state)로 넘긴다. 반환된 Event를 set하면 멈춘다."""
+    import revision_client
+
+    stop = threading.Event()
+
+    def loop():
+        last = None
+        while not stop.wait(0.7):
+            state = revision_client.progress(request_id)
+            if state and state != last:
+                last = state
+                try:
+                    apply(state)
+                except Exception as error:  # 진행 표시 실패가 분석을 막으면 안 된다
+                    print(f"[progress] {error}")
+
+    threading.Thread(target=loop, daemon=True).start()
+    return stop
+
+
+# ReVision 단계 -> (분석 단계 번호, 안내 문구). 시나리오 분석은 진행률 12~68%를 이 단계들이 채운다.
+GROUND_STAGE_INFO = {
+    "decode": (1, "영상을 프레임으로 푸는 중..."),
+    "clip": (1, "프레임 특징을 계산하는 중..."),
+    "audio": (3, "오디오 특징을 추출하는 중..."),
+    "ground": (4, "시나리오 구간을 탐색하는 중..."),
+}
+
+
+def apply_ground_progress(job_id: str, state: dict):
+    step, message = GROUND_STAGE_INFO.get(state.get("stage"), (1, "분석 중..."))
+    detail = f" ({state['detail']})" if state.get("detail") and state.get("stage") in ("clip", "ground") else ""
+    update_job(job_id, progress=int(12 + state["fraction"] * 56), step_id=step, step_label=ANALYSIS_STEPS[step], message=message + detail)
+
 
 def ground_with_revision(request: AnalysisRequest, job_id: str | None) -> list:
     """ReVision 서비스로 모든 시나리오의 구간을 한 번에 찾는다. 시나리오와 같은 순서로 {"start","end"} 또는 None."""
@@ -350,7 +348,23 @@ def ground_with_revision(request: AnalysisRequest, job_id: str | None) -> list:
             step_label=ANALYSIS_STEPS[1],
             message="ReVision으로 시나리오 구간을 탐색 중입니다.",
         )
-    return revision_client.ground(request.video_path, queries)
+    stop = watch_revision_progress(job_id, lambda state: apply_ground_progress(job_id, state)) if job_id else None
+    try:
+        return revision_client.ground(request.video_path, queries, request_id=job_id)
+    finally:
+        if stop:
+            stop.set()
+
+def valid_known_segment(segment) -> dict | None:
+    """이미 알고 있는 구간({"start","end"} 초)이 쓸 만한지 확인한다. 아니면 None(=다시 찾는다)."""
+    try:
+        start, end = float(segment["start"]), float(segment["end"])
+    except (TypeError, KeyError, ValueError):
+        return None
+    if not (0 <= start < end):
+        return None
+    return {"start": start, "end": end}
+
 
 def run_analysis(request: AnalysisRequest, job_id: str | None = None):
     print(f"video_path: {request.video_path}")
@@ -364,19 +378,29 @@ def run_analysis(request: AnalysisRequest, job_id: str | None = None):
 
     total_scenarios = max(1, len(request.scenarios))
 
-    # ANALYSIS_ENGINE=revision(기본): ReVisionLLM 서비스. clip: 기존 CLIP 검색 + Video-LLaVA 검증.
-    use_revision = os.environ.get("ANALYSIS_ENGINE", "revision") == "revision"
-    revision_segments: list = []
-    if use_revision:
+    # 구간을 이미 아는 장면(추천으로 받은 것)은 검색하지 않고 그 시간을 그대로 쓴다. 나머지만 ReVision으로 찾는다.
+    known = [valid_known_segment(request.known_segments[i]) if request.known_segments and i < len(request.known_segments) else None
+             for i in range(len(request.scenarios))]
+    to_find = [i for i, segment in enumerate(known) if segment is None]
+    revision_segments: list = list(known)
+
+    if to_find:
+        # 분석은 ReVision 서비스로만 수행한다. 연결할 수 없으면 분석을 시작하지 않고 안내 문구를 반환한다.
         import revision_client
-        if revision_client.is_available():
-            revision_segments = ground_with_revision(request, job_id)
-        else:
-            use_revision = False
-            message = "⚠️ ReVision 서비스에 연결할 수 없어 기존 CLIP 검색으로 분석합니다."
-            print(message)
-            if job_id:
-                add_job_log(job_id, message)
+        if not revision_client.is_available():
+            print("⚠️ ReVision 서비스에 연결할 수 없어 분석을 시작하지 않습니다.")
+            raise ReVisionUnavailableError(REVISION_UNAVAILABLE_MESSAGE)
+        queries_en = request.queries_en if request.queries_en and len(request.queries_en) == len(request.scenarios) else None
+        sub_request = AnalysisRequest(
+            project_name=request.project_name,
+            video_path=request.video_path,
+            scenarios=[request.scenarios[i] for i in to_find],
+            queries_en=[queries_en[i] for i in to_find] if queries_en else None,
+        )
+        for index, found in zip(to_find, ground_with_revision(sub_request, job_id)):
+            revision_segments[index] = found
+    elif job_id:
+        add_job_log(job_id, "✓  추천받은 구간을 그대로 사용합니다")
 
     for i, query in enumerate(request.scenarios, start=1):
         safe_query_text = make_safe_name(query)[:30]
@@ -392,20 +416,9 @@ def run_analysis(request: AnalysisRequest, job_id: str | None = None):
                 message=f"{i}/{total_scenarios} 시나리오 프레임을 분석 중입니다.",
             )
 
-        if use_revision:
-            found = revision_segments[i - 1]
-            segments = [found] if found else []
-            print(f"[revision] scenario {i} '{query}' -> {found}")
-        else:
-            pipeline_result = run_local_clip_search(
-                video_path=request.video_path,
-                query=query,
-                project_name=safe_project,
-                scenario_folder_name=scenario_folder_name,
-            )
-            print(f"pipeline_result keys: {pipeline_result.keys() if isinstance(pipeline_result, dict) else 'list'}")
-            print(f"pipeline_result: {pipeline_result}")
-            segments = pipeline_result.get("segments", []) if isinstance(pipeline_result, dict) else pipeline_result
+        found = revision_segments[i - 1]
+        segments = [found] if found else []
+        print(f"[revision] scenario {i} '{query}' -> {found}")
 
         if job_id:
             update_job(
@@ -418,20 +431,6 @@ def run_analysis(request: AnalysisRequest, job_id: str | None = None):
 
         if segments: # 수정
             best = segments[0] #
-            if not use_revision:
-                try:
-                    vllava_result = get_verifier().verify_timestamp(
-                        video_path=request.video_path,
-                        scenario_text=query,
-                        candidates=segments,
-                    )
-                    if isinstance(vllava_result, dict):
-                        best = segments[vllava_result.get("best_idx", 0)]
-                except Exception as error:
-                    print(f"⚠️ [VLLaVA] verifier unavailable, using first CLIP segment: {error}")
-                    if job_id:
-                        add_job_log(job_id, "⚠️ VLLaVA 검증을 건너뛰고 첫 번째 후보 구간을 사용했습니다.")
-
             if job_id:
                 update_job(
                     job_id,
@@ -493,7 +492,7 @@ def run_analysis_job(job_id: str, request: AnalysisRequest):
             job_id,
             status="error",
             error=str(error),
-            message="분석 요청에 실패했습니다.",
+            message=REVISION_UNAVAILABLE_MESSAGE if isinstance(error, ReVisionUnavailableError) else "분석 요청에 실패했습니다.",
         )
 
 @app.post("/analyze/jobs", response_model=AnalysisJobStartResponse)
@@ -502,9 +501,11 @@ async def start_analyze_job(
     project_name: str = Form(...),
     scenarios: str = Form(...),
     queries_en: Optional[str] = Form(None),
+    known_segments: Optional[str] = Form(None),
 ):
     scenarios_list: List[str] = json.loads(scenarios)
     queries_en_list: Optional[List[str]] = json.loads(queries_en) if queries_en else None
+    known_segments_list: Optional[List[Optional[dict]]] = json.loads(known_segments) if known_segments else None
 
     suffix = os.path.splitext(video.filename or ".mp4")[1] or ".mp4"
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
@@ -520,6 +521,7 @@ async def start_analyze_job(
         video_path=tmp.name,
         scenarios=scenarios_list,
         queries_en=queries_en_list,
+        known_segments=known_segments_list,
     )
 
     job_id = uuid.uuid4().hex
@@ -543,6 +545,218 @@ async def start_analyze_job(
     thread.start()
 
     return {"status": "queued", "job_id": job_id}
+
+# ---------------------------------------------------------------------------------------------------------
+# 하이라이트 추출 / 장면 추천 (ReVision 서비스의 /highlights, /recommend를 부른다)
+# ---------------------------------------------------------------------------------------------------------
+HIGHLIGHT_STEPS = [
+    "영상 파일 수신 중",
+    "프레임 디코딩",
+    "프레임 특징 추출",
+    "오디오 분석",
+    "하이라이트 점수 계산",
+    "후보 구간 확정",
+]
+HIGHLIGHT_STEP_MESSAGES = [
+    "분석 요청을 수신했습니다.",
+    "영상을 프레임으로 푸는 중...",
+    "프레임마다 장면의 특징을 계산하는 중...",
+    "음량 · 음성 · 효과음 특징을 추출하는 중...",
+    "구간별 반응도 점수를 매기는 중...",
+    "구간에 이름을 붙이고 정리하는 중...",
+]
+# ReVision 단계 -> 하이라이트 단계 번호
+HIGHLIGHT_STAGE_STEP = {"decode": 1, "clip": 2, "audio": 3, "score": 4, "plan": 4, "caption": 5, "name": 5}
+HIGHLIGHT_WAVEFORM_BARS = 170
+
+
+def save_upload_to_temp(content: bytes, filename: str | None) -> str:
+    suffix = os.path.splitext(filename or ".mp4")[1] or ".mp4"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        tmp.write(content)
+        tmp.flush()
+    finally:
+        tmp.close()
+    return tmp.name
+
+
+def apply_highlight_progress(job_id: str, state: dict):
+    step = HIGHLIGHT_STAGE_STEP.get(state.get("stage"), 1)
+    detail = f" ({state['detail']})" if state.get("detail") and state.get("stage") in ("clip", "caption") else ""
+    update_job(
+        job_id,
+        progress=int(8 + state["fraction"] * 86),
+        step_id=step,
+        step_label=HIGHLIGHT_STEPS[step],
+        message=HIGHLIGHT_STEP_MESSAGES[step] + detail,
+    )
+
+
+def run_highlight_job(job_id: str, video_path: str, title: str | None):
+    """진행률은 ReVision 서비스가 보고하는 실제 단계(디코딩 · CLIP · 오디오 · 점수 · 설명 n/m)를 그대로 따른다."""
+    stop = None
+    try:
+        update_job(job_id, status="running", progress=5, step_id=0, step_label=HIGHLIGHT_STEPS[0], message=HIGHLIGHT_STEP_MESSAGES[0])
+        add_job_log(job_id, f"✓  {HIGHLIGHT_STEPS[0]}")
+
+        import revision_client
+        if not revision_client.is_available():
+            raise ReVisionUnavailableError(REVISION_UNAVAILABLE_MESSAGE)
+
+        stop = watch_revision_progress(job_id, lambda state: apply_highlight_progress(job_id, state))
+        try:
+            found = revision_client.highlights(video_path, title, request_id=job_id)
+        finally:
+            stop.set()
+
+        update_job(job_id, progress=96, step_id=5, step_label=HIGHLIGHT_STEPS[5], message="오디오 파형을 만드는 중...")
+        from audio.audio_waveform import extract_audio_waveform
+        audio = extract_audio_waveform(video_path, bar_count=HIGHLIGHT_WAVEFORM_BARS)
+
+        highlights = [
+            {"id": item["id"], "start": round(item["start"], 1), "end": round(item["end"], 1), "label": item["label"]}
+            for item in found["highlights"]
+        ]
+        for label in HIGHLIGHT_STEPS[1:]:
+            add_job_log(job_id, f"✓  {label}")
+        update_job(
+            job_id,
+            status="success",
+            progress=100,
+            step_id=5,
+            step_label=HIGHLIGHT_STEPS[5],
+            message="후보 구간 확정 완료",
+            found=highlights,
+            result={
+                "duration": audio["duration"] or found["duration"],
+                "highlights": highlights,
+                "audio": {"barCount": audio["barCount"], "amplitudes": audio["amplitudes"]},
+            },
+        )
+    except Exception as error:
+        if stop:
+            stop.set()
+        print(f"❌ 하이라이트 추출 에러: {error}")
+        import traceback
+        traceback.print_exc()
+        update_job(
+            job_id,
+            status="error",
+            error=str(error),
+            message=REVISION_UNAVAILABLE_MESSAGE if isinstance(error, ReVisionUnavailableError) else "하이라이트 추출에 실패했습니다.",
+        )
+
+
+@app.post("/highlights/jobs")
+async def start_highlight_job(
+    video: UploadFile = File(...),
+    project_name: str = Form(...),
+    title_en: Optional[str] = Form(None),
+):
+    video_path = save_upload_to_temp(await video.read(), video.filename)
+
+    job_id = uuid.uuid4().hex
+    with analysis_jobs_lock:
+        analysis_jobs[job_id] = {
+            "status": "queued",
+            "progress": 0,
+            "step_id": 0,
+            "step_label": HIGHLIGHT_STEPS[0],
+            "message": "분석 대기 중입니다.",
+            "logs": [],
+            "project": project_name,
+            "results": [],
+            "found": [],
+            "result": None,
+            "error": None,
+            "video_path": video_path,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+        }
+
+    threading.Thread(target=run_highlight_job, args=(job_id, video_path, (title_en or "").strip() or None), daemon=True).start()
+    return {"status": "queued", "job_id": job_id}
+
+
+@app.get("/highlights/jobs/{job_id}")
+async def get_highlight_job(job_id: str):
+    with analysis_jobs_lock:
+        job = analysis_jobs.get(job_id)
+        if not job or "result" not in job:
+            raise HTTPException(status_code=404, detail="Highlight job not found")
+        return {key: job.get(key) for key in ("status", "progress", "step_id", "step_label", "message", "logs", "project", "video_path", "error", "found", "result")}
+
+
+@app.post("/recommend")
+async def recommend_scenes(
+    video: UploadFile = File(...),
+    title_en: Optional[str] = Form(None),
+):
+    import asyncio
+    import revision_client
+
+    if not revision_client.is_available():
+        raise HTTPException(status_code=503, detail=REVISION_UNAVAILABLE_MESSAGE)
+
+    video_path = save_upload_to_temp(await video.read(), video.filename)
+    try:
+        scenes = await asyncio.to_thread(revision_client.recommend, video_path, (title_en or "").strip() or None)
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    finally:
+        try:
+            os.remove(video_path)
+        except OSError:
+            pass
+    return {"scenes": scenes}
+
+
+class ScenarioFindRequest(BaseModel):
+    video_path: str
+    scenarios: List[str]
+    queries_en: Optional[List[str]] = None
+
+
+def resolve_uploaded_video(video_path: str) -> str:
+    """분석 때 올라온 영상(임시 폴더의 파일)만 허용한다. 임의의 서버 파일 경로를 열어 보게 두지 않으려는 것이다."""
+    real = os.path.realpath(video_path)
+    temp_root = os.path.realpath(tempfile.gettempdir())
+    if os.path.dirname(real) != temp_root or not os.path.isfile(real):
+        raise HTTPException(status_code=404, detail="분석에 쓴 영상을 서버에서 찾을 수 없어요. 영상을 다시 올려 주세요.")
+    return real
+
+
+@app.post("/analyze/scenarios")
+async def find_scenarios(request: ScenarioFindRequest):
+    """이미 분석한 영상에서 시나리오(장면 설명)를 더 찾는다. 구간만 돌려주고 파형은 만들지 않는다.
+
+    -> {"results": [{"scenario": "...", "start": 1.0, "end": 4.5} | null, ...]}  (null = 영상에서 찾지 못함)
+    """
+    import asyncio
+    import revision_client
+
+    scenarios = [text.strip() for text in request.scenarios]
+    if not scenarios or not all(scenarios):
+        raise HTTPException(status_code=400, detail="찾을 장면을 입력해 주세요.")
+
+    video_path = resolve_uploaded_video(request.video_path)
+    if not revision_client.is_available():
+        raise HTTPException(status_code=503, detail=REVISION_UNAVAILABLE_MESSAGE)
+
+    queries = request.queries_en if request.queries_en and len(request.queries_en) == len(scenarios) else scenarios
+    try:
+        found = await asyncio.to_thread(revision_client.ground, video_path, queries)
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=str(error))
+
+    return {
+        "results": [
+            None if item is None else {"scenario": scenario, "start": round(item["start"], 1), "end": round(item["end"], 1)}
+            for scenario, item in zip(scenarios, found)
+        ]
+    }
+
 
 @app.get("/analyze/jobs/{job_id}", response_model=AnalysisJobStatus)
 async def get_analyze_job(job_id: str):
@@ -635,7 +849,10 @@ async def get_transcribe_job(job_id: str):
 
 @app.post("/analyze")
 async def analyze(request: AnalysisRequest):
-    final_results = run_analysis(request)
+    try:
+        final_results = run_analysis(request)
+    except ReVisionUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error))
 
     return {
         "status": "success",

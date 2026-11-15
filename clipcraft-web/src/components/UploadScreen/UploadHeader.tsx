@@ -48,7 +48,7 @@ export default function UploadHeader({ onLogoClick, projectFormat, projectName, 
         >
           원본 영상을 업로드하고,
           <br />
-          찾고 싶은 장면을 순서대로 입력하세요.
+          찾는 방법을 골라 주세요.
         </motion.p>
       </motion.div>
     </>

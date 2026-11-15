@@ -3,6 +3,7 @@ import type { ChangeEvent, DragEvent } from 'react';
 import { AnimatePresence, motion, useAnimationControls, useReducedMotion } from 'framer-motion';
 import Icon from '@/components/Icon';
 import MonoLabel from '@/components/MonoLabel';
+import { UPLOAD_PANEL_HEIGHT } from '@/components/UploadScreen/MethodPanel';
 import { icons } from '@/components/icons';
 import { fadeInUp, fadeSwap, videoPreviewEntrance } from '@/lib/animations';
 import { cn } from '@/lib/cn';
@@ -84,8 +85,9 @@ export default function VideoUploadPanel({
 
   return (
     <motion.section
-      className={cn('flex h-[424px] flex-col bg-white max-[900px]:h-[424px]', useEmptyStateDesign ? 'rounded-[14px]' : 'rounded-xl', panelPadding)}
+      className={cn('flex flex-col bg-white', useEmptyStateDesign ? 'rounded-[14px]' : 'rounded-xl', panelPadding)}
       style={{
+        height: UPLOAD_PANEL_HEIGHT,
         border: useEmptyStateDesign ? `1px dashed ${isUploadDragActive ? accent : 'rgba(0,0,0,0.14)'}` : '1px solid rgba(0,0,0,0.1)',
         background: useEmptyStateDesign && isUploadDragActive ? accentTint : '#fff',
         transition: 'background-color 0.18s ease, border-color 0.18s ease',

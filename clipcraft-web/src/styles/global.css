@@ -1,6 +1,51 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,200..700;1,9..40,200..700&family=DM+Mono:wght@400;500&family=Noto+Sans+KR:wght@300;400;500;700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 @import 'tailwindcss';
 
+/* ClipCraft Design System tokens (tokens.json). 유틸리티 이름: text-ink-56, border-line-soft, bg-canvas … */
+@theme {
+  --color-canvas: #f5f5f5;
+  --color-ink-72: rgba(0, 0, 0, 0.72);
+  --color-ink-56: rgba(0, 0, 0, 0.56);
+  --color-ink-40: rgba(0, 0, 0, 0.4);
+  --color-ink-28: rgba(0, 0, 0, 0.28);
+  --color-line: rgba(0, 0, 0, 0.13);
+  --color-line-app: rgba(0, 0, 0, 0.12);
+  --color-line-soft: rgba(0, 0, 0, 0.08);
+  --color-line-strong: rgba(0, 0, 0, 0.22);
+  --color-glass: rgba(0, 0, 0, 0.05);
+  --color-glass-hover: rgba(0, 0, 0, 0.09);
+  --color-stage: #120800;
+  --color-success-ink: #067f5b;
+  --color-warning-ink: #a4660a;
+  --color-danger: #dc2626;
+  --color-danger-ink: #b91c1c;
+  --color-danger-tint: rgba(239, 68, 68, 0.1);
+}
+
+@keyframes ccspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ccshimmer {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: 200px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
 @layer base {
   html,
   body,
@@ -85,5 +130,273 @@
   46%,
   100% {
     opacity: 0;
+  }
+}
+
+/* ── Editor layout (에디터 화면) ── */
+.ed-root {
+  position: relative;
+  display: grid;
+  height: 100vh;
+  grid-template-columns: minmax(0, 1fr) var(--ed-pw, 380px);
+  grid-template-rows: 52px minmax(0, 1fr) auto;
+  grid-template-areas: 'top top' 'stage panel' 'tl panel';
+  overflow: hidden;
+  background: #fff;
+}
+.ed-top {
+  grid-area: top;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 0 16px;
+}
+.ed-top button {
+  white-space: nowrap;
+  flex: none;
+}
+.ed-sep {
+  width: 1px;
+  height: 16px;
+  flex: none;
+  background: rgba(0, 0, 0, 0.12);
+}
+.ed-pname {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 480;
+}
+.ed-stage {
+  grid-area: stage;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  padding: 16px 20px 14px;
+  background: #f7f7f8;
+}
+.ed-vwrap {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.ed-tl {
+  grid-area: tl;
+  min-width: 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+.ed-panel {
+  position: relative;
+  grid-area: panel;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
+}
+.ed-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  z-index: 6;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.ed-resize::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.ed-resize:hover::after,
+.ed-resize:active::after,
+.ed-resize:focus-visible::after {
+  background: #5b4cf5;
+}
+.ed-resize:focus-visible {
+  outline: none;
+}
+.ed-list {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+.ed-foot {
+  flex: none;
+}
+.ed-row {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  cursor: pointer;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  padding: 8px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ed-row:hover {
+  border-color: rgba(0, 0, 0, 0.22);
+}
+.ed-row:focus-visible {
+  outline: 2px solid #5b4cf5;
+  outline-offset: 1px;
+}
+.ed-grip {
+  display: inline-flex;
+  flex: none;
+  cursor: grab;
+  align-items: center;
+  padding: 0 2px;
+  color: rgba(0, 0, 0, 0.28);
+}
+.ed-row:hover .ed-grip {
+  color: rgba(0, 0, 0, 0.5);
+}
+.ed-row:active .ed-grip {
+  cursor: grabbing;
+}
+.ed-row .ed-rm {
+  opacity: 0;
+}
+.ed-row:hover .ed-rm,
+.ed-row:focus-within .ed-rm {
+  opacity: 1;
+}
+@media (hover: none) {
+  .ed-row .ed-rm {
+    opacity: 1;
+  }
+}
+.ed-ibtn {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.05);
+  color: rgba(0, 0, 0, 0.6);
+  transition: background 0.15s;
+}
+.ed-ibtn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.1);
+}
+.ed-ibtn:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.ed-pill {
+  display: inline-flex;
+  height: 32px;
+  flex: none;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: 50px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 480;
+  white-space: nowrap;
+  transition: opacity 0.15s, background 0.15s;
+}
+.ed-pill:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.ed-pill-ghost {
+  background: #fff;
+  color: #000;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+.ed-pill-ghost:hover:not(:disabled) {
+  background: #f5f5f5;
+}
+.ed-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+  display: flex;
+  width: min(360px, 100vw);
+  flex-direction: column;
+  background: #fff;
+  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.12);
+  transform: translateX(105%);
+  transition: transform 0.22s ease, visibility 0.22s;
+  visibility: hidden;
+}
+.ed-drawer[data-open='1'] {
+  transform: none;
+  visibility: visible;
+}
+@media (max-width: 1280px) {
+  .ed-lbl-h {
+    display: none;
+  }
+}
+@media (max-width: 900px) {
+  .ed-root {
+    height: auto;
+    min-height: 100vh;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas: 'top' 'stage' 'tl' 'panel';
+    overflow: visible;
+  }
+  .ed-stage {
+    padding: 12px 16px;
+  }
+  .ed-vwrap {
+    flex: none;
+    height: min(56vw, 70vh);
+  }
+  .ed-resize {
+    display: none;
+  }
+  .ed-panel {
+    height: 480px;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+    border-left: none;
+  }
+  .ed-lbl-full {
+    display: none;
+  }
+}
+@media (max-width: 640px) {
+  .ed-lbl {
+    display: none;
+  }
+  .ed-pname {
+    max-width: 140px;
+  }
+  .ed-top {
+    gap: 8px;
+    padding: 0 12px;
   }
 }
