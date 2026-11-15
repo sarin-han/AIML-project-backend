@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
-import { downloadExportedVideo, requestExportVideo } from '@/api/export';
+import { downloadExportedVideo, exportFileName, requestExportVideo } from '@/api/export';
 import { ApiError } from '@/api/client';
 import { requestChatEdit } from '@/api/chatEdit';
 import { saveProjectState } from '@/api/projects';
@@ -977,7 +977,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     try {
       const subtitleCues = exportWithSubtitles ? mapCuesToTimeline(subtitles, segments, segmentEditSettings, subtitleStyle.bilingual, subtitleStyle.showExtra) : [];
       const blob = await requestExportVideo(videoPath, segments, segmentEditSettings, subtitleCues.length > 0 ? { cues: subtitleCues, style: subtitleStyle } : undefined, undefined, setExportProgress);
-      downloadExportedVideo(blob);
+      downloadExportedVideo(blob, exportFileName(projectName));
       if (projectId && accessToken) {
         const exportedSeconds = segments.reduce((total, segment) => total + Math.max(0, segment.end - segment.start) / (segmentEditSettings.find((item) => item.segmentId === segment.id)?.speed || 1), 0);
         saveProjectState(accessToken, projectId, { status: 'completed', exported_duration_seconds: Math.round(exportedSeconds * 10) / 10 }).catch(() => undefined);

@@ -121,6 +121,19 @@ export async function requestExportVideo(
   return download.blob();
 }
 
+/** 프로젝트 제목으로 내려받을 파일 이름을 만든다. 파일 이름에 못 쓰는 글자는 빼고, 비면 기본 이름을 쓴다. */
+export function exportFileName(title?: string | null): string {
+  const cleaned = (title ?? '')
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^\.+/, '')
+    .slice(0, 80)
+    .trim();
+
+  return `${cleaned || 'clipcraft_export'}.mp4`;
+}
+
 export function downloadExportedVideo(blob: Blob, fileName = 'clipcraft_export.mp4'): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
