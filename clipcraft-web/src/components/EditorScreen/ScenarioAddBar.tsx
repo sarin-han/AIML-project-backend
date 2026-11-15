@@ -46,10 +46,10 @@ export default function ScenarioAddBar({ accent, onAdd, onOpenRecommend, onOpenH
   return (
     <div className="ed-foot border-t border-line-soft bg-white px-4 py-3" data-testid="editor-scenario-add">
       {(onOpenRecommend || onOpenHighlights) && (
-        <div className="mb-3 flex gap-2">
+        <div className="mb-3 flex flex-wrap gap-2">
           {onOpenRecommend && (
             <button
-              className="inline-flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-line-soft bg-white px-3 py-2 text-[12.5px] font-[500] tracking-[-0.1px] text-ink-72 transition-colors hover:bg-black/[0.03]"
+              className="inline-flex flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-line-soft bg-white px-3 py-2 text-[12.5px] font-[500] tracking-[-0.1px] text-ink-72 transition-colors hover:bg-black/[0.03]"
               data-testid="editor-open-recommend"
               onClick={onOpenRecommend}
               type="button"
@@ -60,7 +60,7 @@ export default function ScenarioAddBar({ accent, onAdd, onOpenRecommend, onOpenH
           )}
           {onOpenHighlights && (
             <button
-              className="inline-flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-line-soft bg-white px-3 py-2 text-[12.5px] font-[500] tracking-[-0.1px] text-ink-72 transition-colors hover:bg-black/[0.03]"
+              className="inline-flex flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-line-soft bg-white px-3 py-2 text-[12.5px] font-[500] tracking-[-0.1px] text-ink-72 transition-colors hover:bg-black/[0.03]"
               data-testid="editor-open-highlights"
               onClick={onOpenHighlights}
               type="button"
@@ -71,13 +71,13 @@ export default function ScenarioAddBar({ accent, onAdd, onOpenRecommend, onOpenH
           )}
         </div>
       )}
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2">
         <MonoLabel>시나리오 추가</MonoLabel>
-        <span className="text-[11px] whitespace-nowrap text-ink-56">영상에서 찾아 목록 끝에 넣어요</span>
+        <span className="text-[11px] text-ink-56">영상에서 찾아 목록 끝에 넣어요</span>
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <div
-          className="flex flex-1 items-center gap-2 rounded-[10px] bg-white px-3 py-2 transition-colors"
+          className="flex min-w-[150px] flex-1 items-center gap-2 rounded-[10px] bg-white px-3 py-2 transition-colors"
           style={{ border: `1.5px solid ${error ? '#dc2626' : focused ? accent : 'rgba(0,0,0,0.12)'}` }}
         >
           <Icon d={icons.search} size={14} stroke={focused ? accent : 'rgba(0,0,0,0.4)'} />

@@ -199,6 +199,10 @@ const PANEL_DEFAULT = 380;
 const PANEL_MIN = 300;
 const PANEL_MAX = 640;
 const PANEL_STORAGE_KEY = 'cc-ed-pw';
+const AI_DEFAULT = 340;
+const AI_MIN = 280;
+const AI_MAX = 560;
+const AI_STORAGE_KEY = 'cc-ed-aw';
 
 function loadPanelWidth(): number {
   try {
@@ -206,6 +210,15 @@ function loadPanelWidth(): number {
     return saved >= PANEL_MIN && saved <= PANEL_MAX ? saved : PANEL_DEFAULT;
   } catch {
     return PANEL_DEFAULT;
+  }
+}
+
+function loadAssistantWidth(): number {
+  try {
+    const saved = Number(localStorage.getItem(AI_STORAGE_KEY));
+    return saved >= AI_MIN && saved <= AI_MAX ? saved : AI_DEFAULT;
+  } catch {
+    return AI_DEFAULT;
   }
 }
 
@@ -268,6 +281,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
   const [tab, setTab] = useState<'scenes' | 'subs'>('scenes');
   const [subtitleTrackOpen, setSubtitleTrackOpen] = useState(false);
   const [panelWidth, setPanelWidth] = useState(loadPanelWidth);
+  const [assistantWidth, setAssistantWidth] = useState(loadAssistantWidth);
   const rootRef = useRef<HTMLDivElement>(null);
   const [exportWithSubtitles, setExportWithSubtitles] = useState(true);
   const [selectedCueId, setSelectedCueId] = useState<number | null>(null);
@@ -1073,27 +1087,34 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
   const subtitleClipIndex = playheadClipIndex >= 0 ? playheadClipIndex : activeSegment !== null && segments[activeSegment] ? activeSegment : null;
   const subtitleClip = subtitleClipIndex !== null ? { end: segments[subtitleClipIndex].end, index: subtitleClipIndex, start: segments[subtitleClipIndex].start } : null;
 
+  const assistantSpace = assistantOpen ? assistantWidth : 0;
   const clampPanelWidth = (value: number) => {
     const rootWidth = rootRef.current?.getBoundingClientRect().width ?? 1200;
-    return Math.round(Math.max(PANEL_MIN, Math.min(value, PANEL_MAX, rootWidth * 0.55)));
+    const max = Math.max(PANEL_MIN, Math.min(PANEL_MAX, rootWidth * 0.55 - assistantSpace));
+    return Math.round(Math.max(PANEL_MIN, Math.min(value, max)));
   };
-  const savePanelWidth = (value: number) => {
+  const clampAssistantWidth = (value: number) => {
+    const rootWidth = rootRef.current?.getBoundingClientRect().width ?? 1200;
+    const max = Math.max(AI_MIN, Math.min(AI_MAX, rootWidth * 0.4));
+    return Math.round(Math.max(AI_MIN, Math.min(value, max)));
+  };
+  const saveWidth = (key: string, value: number) => {
     try {
-      localStorage.setItem(PANEL_STORAGE_KEY, String(value));
+      localStorage.setItem(key, String(value));
     } catch {
       // 저장소를 쓸 수 없어도 화면은 그대로 동작한다.
     }
   };
-  const startPanelResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const savePanelWidth = (value: number) => saveWidth(PANEL_STORAGE_KEY, value);
+  const dragWidth = (event: ReactPointerEvent<HTMLDivElement>, widthAt: (clientX: number) => number, apply: (value: number) => void, save: (value: number) => void) => {
     event.preventDefault();
-    const widthAt = (clientX: number) => clampPanelWidth((rootRef.current?.getBoundingClientRect().right ?? clientX) - clientX);
-    const onMove = (moveEvent: PointerEvent) => setPanelWidth(widthAt(moveEvent.clientX));
+    const onMove = (moveEvent: PointerEvent) => apply(widthAt(moveEvent.clientX));
     const onUp = (upEvent: PointerEvent) => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
-      savePanelWidth(widthAt(upEvent.clientX));
+      save(widthAt(upEvent.clientX));
     };
 
     document.body.style.cursor = 'col-resize';
@@ -1101,12 +1122,17 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
   };
+  // 시나리오 패널의 오른쪽 끝은 어시스턴트 열이 열려 있으면 그 열 왼쪽이다.
+  const startPanelResize = (event: ReactPointerEvent<HTMLDivElement>) =>
+    dragWidth(event, (clientX) => clampPanelWidth((rootRef.current?.getBoundingClientRect().right ?? clientX) - assistantSpace - clientX), setPanelWidth, savePanelWidth);
+  const startAssistantResize = (event: ReactPointerEvent<HTMLDivElement>) =>
+    dragWidth(event, (clientX) => clampAssistantWidth((rootRef.current?.getBoundingClientRect().right ?? clientX) - clientX), setAssistantWidth, (value) => saveWidth(AI_STORAGE_KEY, value));
 
   const ghostButton =
     'ed-pill ed-pill-ghost';
 
   return (
-    <div className="ed-root" ref={rootRef} style={{ '--ed-pw': `${panelWidth}px` } as CSSProperties}>
+    <div className="ed-root" data-assistant={assistantOpen ? 1 : 0} ref={rootRef} style={{ '--ed-pw': `${panelWidth}px`, '--ed-aw': `${assistantWidth}px` } as CSSProperties}>
       <header className="ed-top">
         <button className="ed-ibtn" onClick={onBack} type="button" aria-label="이전 단계" title="이전 단계">
           <Icon d={editorIcons.arrowLeft} size={15} strokeWidth={1.6} />
@@ -1337,9 +1363,30 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
         )}
       </aside>
 
-      {/* AI 어시스턴트는 필요할 때만 오른쪽에서 밀려 나오는 서랍. 닫아도 대화 기록이 사라지지 않도록 화면에서만 숨긴다. */}
-      {assistantOpen && <div className="fixed inset-0 z-[70] bg-black/[0.12]" onClick={() => setAssistantOpen(false)} />}
-      <div aria-hidden={!assistantOpen} className="ed-drawer" data-open={assistantOpen ? 1 : 0} data-testid="assistant-drawer">
+      {/* AI 어시스턴트는 편집 화면 오른쪽에 붙는 열. 닫아도 대화 기록이 사라지지 않도록 화면에서만 숨긴다. */}
+      <div aria-hidden={!assistantOpen} className="ed-ai" data-testid="assistant-drawer">
+        <div
+          aria-label="어시스턴트 너비 조절 (←/→, 더블클릭으로 초기화)"
+          aria-orientation="vertical"
+          aria-valuemax={AI_MAX}
+          aria-valuemin={AI_MIN}
+          aria-valuenow={assistantWidth}
+          className="ed-resize ed-resize-in"
+          onDoubleClick={() => {
+            setAssistantWidth(AI_DEFAULT);
+            saveWidth(AI_STORAGE_KEY, AI_DEFAULT);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            event.preventDefault();
+            const next = clampAssistantWidth(assistantWidth + (event.key === 'ArrowLeft' ? 16 : -16));
+            setAssistantWidth(next);
+            saveWidth(AI_STORAGE_KEY, next);
+          }}
+          onPointerDown={startAssistantResize}
+          role="separator"
+          tabIndex={0}
+        />
         <AiAssistant accent={accent} onApplyCommand={applyNaturalLanguageCommand} onReset={resetChatThread} onClose={() => setAssistantOpen(false)} />
       </div>
 

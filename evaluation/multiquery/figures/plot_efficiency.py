@@ -54,15 +54,14 @@ def line(ax, xs, ys, color, label, marker, last_dy=0):
 
 
 def draw1(ax):
-    line(ax, Q, sp_cache, C_CACHE, "Feature Cache", "o", -6)
-    line(ax, Q, sp_multi, C_MULTI, "Multi-Query (+ Batch)", "s", 6)
-    style(ax, Q, 22)
+    line(ax, Q, sp_cache, C_CACHE, "Feature Cache", "o")
+    style(ax, Q, 18)
     ax.set_xlabel("Number of Queries")
     ax.set_title("Multi-Query Processing", pad=64)
     ax.legend(loc="upper left", frameon=False, fontsize=FS - 1)
-    ax.text(0.5, 1.10, "18.3× Faster", transform=ax.transAxes, ha="center",
-            fontsize=FS + 4, fontweight="bold", color=C_MULTI)
-    ax.text(0.5, 1.03, "643.3s → 35.1s (20 Queries)", transform=ax.transAxes,
+    ax.text(0.5, 1.10, "15.0× Faster", transform=ax.transAxes, ha="center",
+            fontsize=FS + 4, fontweight="bold", color=C_CACHE)
+    ax.text(0.5, 1.03, "643.3s → 42.9s (20 Queries)", transform=ax.transAxes,
             ha="center", fontsize=FS - 2, color="#444444")
 
 
