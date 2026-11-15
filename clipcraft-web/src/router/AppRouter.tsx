@@ -154,6 +154,7 @@ function ProjectEditorRoute() {
     analysis: HighlightAnalysisResult;
     editor: EditorSavedState | null;
     projectName: string;
+    hasPreview: boolean;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -185,6 +186,7 @@ function ProjectEditorRoute() {
           },
           editor: state.editor,
           projectName: state.project.title,
+          hasPreview: Boolean(state.project.preview_url),
         });
       })
       .catch(() => {
@@ -209,7 +211,7 @@ function ProjectEditorRoute() {
 
   if (!loaded) return <div className="flex min-h-screen items-center justify-center text-[15px] text-black/50">프로젝트를 불러오는 중…</div>;
 
-  const { analysis, editor, projectName } = loaded;
+  const { analysis, editor, projectName, hasPreview } = loaded;
 
   return (
     <EditorScreen
@@ -221,6 +223,7 @@ function ProjectEditorRoute() {
       projectId={analysis.projectId}
       jobId={analysis.jobId}
       initialEditor={editor ?? undefined}
+      hasPreview={hasPreview}
       onBack={() => navigate('/workspace')}
     />
   );

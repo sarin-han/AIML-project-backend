@@ -195,6 +195,8 @@ class ProjectStatePayload(BaseModel):
     video_path: str | None = None
     status: str | None = None
     exported_duration_seconds: float | None = None
+    # 프로젝트 목록 썸네일(작은 JPEG data URL). 영상 중간 프레임을 브라우저가 만들어 보낸다.
+    preview_url: str | None = None
 
 
 def _load_json(text: str | None):
@@ -297,6 +299,10 @@ def put_project_state(
         row.gpu_video_path = payload.video_path
     if payload.status in ("editing", "completed"):
         project.status = payload.status
+    if payload.preview_url is not None:
+        if not payload.preview_url.startswith("data:image/jpeg;base64,") or len(payload.preview_url) > 200_000:
+            raise ApiError(422, "VALIDATION_ERROR", "썸네일 형식이 올바르지 않아요.")
+        project.preview_url = payload.preview_url
     if payload.exported_duration_seconds is not None:
         project.exported_duration_seconds = payload.exported_duration_seconds
 

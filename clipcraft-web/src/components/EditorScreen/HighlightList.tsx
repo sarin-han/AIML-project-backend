@@ -131,8 +131,13 @@ export default function HighlightList({ activeSegment, currentTime, onSegmentCli
               <DragHandle />
             </span>
             <span className="w-1 flex-none self-stretch rounded-sm" style={{ background: color }} />
-            <div className="relative h-9 w-14 flex-none overflow-hidden rounded-md bg-[#1a0800]">
-              {thumbnails[segment.id] ? <img alt="" className="absolute inset-0 h-full w-full object-cover" src={thumbnails[segment.id]} /> : <span className="absolute inset-0 flex items-center justify-center font-mono text-[7px] text-white/25">클립</span>}
+            <div className="relative h-9 w-14 flex-none overflow-hidden rounded-md bg-black">
+              {thumbnails[segment.id] ? <img alt="" className="absolute inset-0 h-full w-full object-cover" src={thumbnails[segment.id]} /> : <span aria-label="썸네일 불러오는 중" className="absolute inset-0 flex items-center justify-center" role="status">
+                  <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="9" stroke="rgba(255,255,255,0.2)" strokeWidth="3" />
+                    <path d="M21 12a9 9 0 0 0-9-9" stroke="white" strokeLinecap="round" strokeWidth="3" />
+                  </svg>
+                </span>}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-1.5">

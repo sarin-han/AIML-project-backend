@@ -112,3 +112,27 @@ function getThumbnailSeekTime(duration: number): number {
   const target = Math.max(1, duration * 0.1);
   return Math.min(target, Math.max(0, duration - 0.1));
 }
+
+/** 영상의 중간 프레임을 목록용 작은 JPEG(data URL)로 만든다. */
+export async function captureProjectThumbnail(videoUrl: string, duration: number): Promise<string> {
+  const full = await captureVideoThumbnail(videoUrl, duration, duration / 2);
+
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const width = Math.min(480, image.naturalWidth);
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = Math.round((image.naturalHeight / image.naturalWidth) * width);
+      const context = canvas.getContext('2d');
+      if (!context) {
+        reject(new Error('CANVAS_CONTEXT_UNAVAILABLE'));
+        return;
+      }
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.72));
+    };
+    image.onerror = () => reject(new Error('THUMBNAIL_DECODE_FAILED'));
+    image.src = full;
+  });
+}

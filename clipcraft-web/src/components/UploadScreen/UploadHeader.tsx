@@ -30,7 +30,7 @@ export default function UploadHeader({ onBack, projectTitle, onProjectTitleChang
         </button>
       </motion.div>
 
-      <motion.div className="text-center mb-10" variants={containerStagger}>
+      <motion.div className="mb-10 w-full text-center" variants={containerStagger}>
         <motion.div className="mb-4 flex items-center justify-center gap-2.5 will-change-[transform,opacity]" variants={fadeInUp}>
           <MonoLabel>AI Video Editor</MonoLabel>
         </motion.div>
@@ -49,7 +49,7 @@ export default function UploadHeader({ onBack, projectTitle, onProjectTitleChang
           <br />
           찾는 방법을 골라 주세요.
         </motion.p>
-        <motion.div className="mx-auto mt-8 flex w-full max-w-[420px] flex-col gap-2 text-left will-change-[transform,opacity]" variants={fadeInUp}>
+        <motion.div className="mt-8 flex w-full flex-col gap-2 text-left will-change-[transform,opacity]" variants={fadeInUp}>
           <label className="text-[12px] font-medium tracking-[-0.1px] text-black/50" htmlFor="project-title-input">프로젝트 제목</label>
           <input
             id="project-title-input"
@@ -60,7 +60,6 @@ export default function UploadHeader({ onBack, projectTitle, onProjectTitleChang
             placeholder="예: 주말 캠핑 브이로그"
             value={projectTitle}
           />
-          <p className="text-[12px] font-[320] tracking-[-0.1px] text-black/40">하이라이트 추출과 시나리오 추천이 이 제목을 참고해요.</p>
         </motion.div>
       </motion.div>
     </>

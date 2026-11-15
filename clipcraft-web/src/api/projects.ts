@@ -71,6 +71,8 @@ export interface EditorSavedState {
   segments: EditorHighlightSegment[];
   subtitleSets: SubtitleSets;
   subtitleStyle: SubtitleStyle;
+  /** 구간 썸네일(작은 JPEG data URL). 키는 `id:시작:끝` */
+  thumbnails?: Record<string, string>;
 }
 
 export interface ProjectState {
@@ -88,6 +90,7 @@ export interface ProjectStateInput {
   video_path?: string;
   status?: 'editing' | 'completed';
   exported_duration_seconds?: number;
+  preview_url?: string;
 }
 
 export async function getProjectState(accessToken: string, projectId: string): Promise<ProjectState> {

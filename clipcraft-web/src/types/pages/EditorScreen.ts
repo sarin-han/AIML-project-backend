@@ -13,6 +13,8 @@ export interface EditorScreenProps {
   /** 서버에 저장되는 프로젝트의 ID. 있으면 편집 내용을 자동 저장한다. */
   projectId?: string;
   jobId?: string;
+  /** 프로젝트 목록 썸네일이 이미 있으면 true */
+  hasPreview?: boolean;
   /** 프로젝트를 다시 열 때 서버에서 불러온 편집 내용 */
   initialEditor?: EditorSavedState;
 }

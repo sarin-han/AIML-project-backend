@@ -70,6 +70,7 @@ def copy_project_data(db: Session, source: models.Project, target: models.Projec
         target.source_size_bytes = source.source_size_bytes
 
     target.source_duration_seconds = source.source_duration_seconds
+    target.preview_url = source.preview_url
     target.scene_count = source.scene_count
     target.status = "editing" if row.analysis else target.status
     db.add_all([copy, target])

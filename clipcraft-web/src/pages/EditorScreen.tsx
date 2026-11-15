@@ -5,6 +5,7 @@ import { ApiError } from '@/api/client';
 import { requestChatEdit } from '@/api/chatEdit';
 import { saveProjectState } from '@/api/projects';
 import { useAuth } from '@/lib/authContext';
+import { captureProjectThumbnail } from '@/lib/videoUpload';
 import { requestSubtitleSuggestions } from '@/api/suggest';
 import { requestTranslations, translateCuesToKorean } from '@/api/translate';
 import { findScenarios } from '@/api/scenarios';
@@ -97,8 +98,12 @@ function captureVideoFrame(videoUrl: string, time: number): Promise<CapturedFram
     const capture = () => {
       if (settled) return;
 
-      canvas.width = video.videoWidth || 320;
-      canvas.height = video.videoHeight || 180;
+      // 목록 썸네일은 작게만 만든다(원본 해상도로 만들면 느리고 저장 용량도 커진다).
+      const sourceWidth = video.videoWidth || 320;
+      const sourceHeight = video.videoHeight || 180;
+      const scale = Math.min(1, 320 / sourceWidth);
+      canvas.width = Math.round(sourceWidth * scale);
+      canvas.height = Math.round(sourceHeight * scale);
       const context = canvas.getContext('2d');
 
       if (!context) {
@@ -119,7 +124,7 @@ function captureVideoFrame(videoUrl: string, time: number): Promise<CapturedFram
       });
     };
 
-    video.preload = 'auto';
+    video.preload = 'metadata';
     video.muted = true;
     video.playsInline = true;
     video.crossOrigin = 'anonymous';
@@ -220,7 +225,7 @@ function snapshotsDiffer(a: EditSnapshot, b: EditSnapshot): boolean {
   return (Object.keys(a) as Array<keyof EditSnapshot>).some((key) => a[key] !== b[key]);
 }
 
-export default function EditorWorkspace({ analysis, onBack, projectName, videoPath, videoName, videoUrl, projectId, jobId, initialEditor }: EditorScreenProps) {
+export default function EditorWorkspace({ analysis, onBack, projectName, videoPath, videoName, videoUrl, projectId, jobId, initialEditor, hasPreview }: EditorScreenProps) {
   const { accent } = useTheme();
   const { accessToken } = useAuth();
   // 서버 프로젝트의 편집이면 브라우저 저장값(모든 프로젝트가 같이 쓰는 키) 대신 서버에 저장된 내용으로 시작한다.
@@ -327,29 +332,40 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     saveDeletedSegmentIds(deletedSegmentIds);
   }, [deletedSegmentIds]);
 
+  // 구간 썸네일: 이미 만든 것(서버에 저장된 것 포함)은 다시 만들지 않고, 없는 것만 세 개씩 나눠서 만든다.
+  const thumbCacheRef = useRef<Record<string, string>>({ ...(initialEditor?.thumbnails ?? {}) });
+  const thumbKey = (segment: EditorHighlightSegment) => `${segment.id}:${segment.start.toFixed(2)}:${segment.end.toFixed(2)}`;
   useEffect(() => {
     if (!videoUrl || segments.length === 0) {
       setSegmentThumbnails({});
       return;
     }
 
+    const cache = thumbCacheRef.current;
+    const fromCache = () => Object.fromEntries(segments.filter((segment) => cache[thumbKey(segment)]).map((segment) => [segment.id, cache[thumbKey(segment)]]));
+    setSegmentThumbnails(fromCache());
+
+    const missing = segments.filter((segment) => !cache[thumbKey(segment)]);
+    if (missing.length === 0) return;
+
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      void Promise.all(
-        segments.map(async (segment) => {
+      const queue = [...missing];
+      const worker = async () => {
+        while (queue.length > 0 && !cancelled) {
+          const segment = queue.shift()!;
           try {
-            return [segment.id, await captureSegmentThumbnail(videoUrl, segment.start, segment.end)] as const;
+            const url = await captureSegmentThumbnail(videoUrl, segment.start, segment.end);
+            if (url) {
+              cache[thumbKey(segment)] = url;
+              if (!cancelled) setSegmentThumbnails(fromCache());
+            }
           } catch {
-            return [segment.id, ''] as const;
+            // 이 구간 썸네일만 비워 둔다.
           }
-        }),
-      ).then((entries) => {
-        if (cancelled) return;
-
-        setSegmentThumbnails(
-          Object.fromEntries(entries.filter(([, thumbnail]) => thumbnail)),
-        );
-      });
+        }
+      };
+      void Promise.all([worker(), worker(), worker()]);
     }, 250);
 
     return () => {
@@ -789,6 +805,19 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     }, 3200);
   };
 
+  // 프로젝트 목록 썸네일: 목록에 아직 썸네일이 없으면 영상 중간 프레임을 한 번 만들어 저장한다.
+  const thumbnailTriedRef = useRef(Boolean(hasPreview));
+  useEffect(() => {
+    if (thumbnailTriedRef.current || !projectId || !accessToken || !videoUrl || !analysis?.duration) return;
+    thumbnailTriedRef.current = true;
+
+    captureProjectThumbnail(videoUrl, analysis.duration)
+      .then((preview) => saveProjectState(accessToken, projectId, { preview_url: preview }))
+      .catch(() => {
+        // 썸네일은 꼭 필요한 게 아니므로 실패해도 넘어간다.
+      });
+  }, [projectId, accessToken, videoUrl, analysis?.duration]);
+
   // 서버 프로젝트의 편집 내용을 잠깐 모아서 저장한다. 저장된 내용으로 막 열었을 때는 바뀐 게 없으므로 첫 실행은 건너뛴다.
   const skipFirstSaveRef = useRef(Boolean(initialEditor));
   useEffect(() => {
@@ -801,14 +830,23 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     const timer = window.setTimeout(() => {
       saveProjectState(accessToken, projectId, {
         analysis: { segments: analysis?.segments ?? [], duration: analysis?.duration ?? 0, barCount: analysis?.barCount ?? 0, amplitudes: analysis?.amplitudes ?? [] },
-        editor: { deletedSegmentIds, extraSegments, segmentEditSettings, segments, subtitleSets, subtitleStyle },
+        editor: {
+          deletedSegmentIds,
+          extraSegments,
+          segmentEditSettings,
+          segments,
+          subtitleSets,
+          subtitleStyle,
+          // 만들어 둔 구간 썸네일도 저장해서, 프로젝트를 다시 열 때 영상에서 다시 뽑지 않게 한다.
+          thumbnails: Object.fromEntries(segments.filter((segment) => thumbCacheRef.current[thumbKey(segment)]).map((segment) => [thumbKey(segment), thumbCacheRef.current[thumbKey(segment)]])),
+        },
         job_id: jobId,
         video_path: videoPath,
       }).catch((error) => console.error('프로젝트 저장 실패', error));
     }, 1000);
 
     return () => window.clearTimeout(timer);
-  }, [projectId, accessToken, analysis, jobId, videoPath, deletedSegmentIds, extraSegments, segmentEditSettings, segments, subtitleSets, subtitleStyle]);
+  }, [projectId, accessToken, analysis, jobId, videoPath, deletedSegmentIds, extraSegments, segmentEditSettings, segments, subtitleSets, subtitleStyle, segmentThumbnails]);
 
   // 편집 상태가 바뀔 때마다 이전 상태를 기록한다.
   useEffect(() => {
