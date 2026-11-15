@@ -19,6 +19,8 @@ interface UploadSessionValue {
   setProjectTitle: (title: string) => void;
   items: ScenarioItem[];
   setItems: (updater: ScenarioItem[] | ((current: ScenarioItem[]) => ScenarioItem[])) => void;
+  /** 새 프로젝트를 시작할 때 이전에 올린 영상·제목·장면을 모두 비운다. */
+  reset: () => void;
 }
 
 const UploadSessionContext = createContext<UploadSessionValue | null>(null);
@@ -36,9 +38,16 @@ export function UploadSessionProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const reset = useCallback(() => {
+    setUploadedVideo(null);
+    setMethod('manual');
+    setItems([]);
+    setProjectTitle('');
+  }, [setUploadedVideo]);
+
   const value = useMemo(
-    () => ({ uploadedVideo, setUploadedVideo, method, setMethod, items, setItems, projectTitle, setProjectTitle }),
-    [uploadedVideo, setUploadedVideo, method, items, projectTitle],
+    () => ({ uploadedVideo, setUploadedVideo, method, setMethod, items, setItems, projectTitle, setProjectTitle, reset }),
+    [uploadedVideo, setUploadedVideo, method, items, projectTitle, reset],
   );
 
   return <UploadSessionContext.Provider value={value}>{children}</UploadSessionContext.Provider>;

@@ -17,7 +17,7 @@ import { createProject, getProjectState } from '@/api/projects';
 import type { EditorSavedState } from '@/api/projects';
 import { pageTransition } from '@/lib/animations';
 import { useAuth } from '@/lib/authContext';
-import { UploadSessionProvider } from '@/state/UploadSession';
+import { UploadSessionProvider, useUploadSession } from '@/state/UploadSession';
 import type { HighlightAnalysisResult, HighlightExtractionResult, PendingHighlightAnalysis } from '@/types/app';
 
 /** 로그인하지 않았으면 로그인 화면으로 보낸다. 로그인 상태를 확인하는 동안에는 아무것도 그리지 않는다. */
@@ -172,6 +172,7 @@ function EditorRoute() {
 function ProjectEditorRoute() {
   const { projectId } = useParams();
   const navigate = useNavigate();
+  const { reset: resetUploadSession } = useUploadSession();
   const { accessToken } = useAuth();
   const [loaded, setLoaded] = useState<{
     analysis: HighlightAnalysisResult;
@@ -189,7 +190,8 @@ function ProjectEditorRoute() {
       .then((state) => {
         if (cancelled) return;
         if (!state.analysis || !state.analysis.segments?.length) {
-          // 분석 결과가 아직 없는 프로젝트는 업로드부터 다시 시작한다.
+          // 분석 결과가 아직 없는 프로젝트는 업로드부터 다시 시작한다. 다른 프로젝트에서 올렸던 영상이 남아 있지 않게 비운다.
+          resetUploadSession();
           navigate('/upload', { replace: true, state: { projectName: state.project.title, projectId } });
           return;
         }
@@ -219,7 +221,7 @@ function ProjectEditorRoute() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, accessToken, navigate]);
+  }, [projectId, accessToken, navigate, resetUploadSession]);
 
   if (error) {
     return (
@@ -261,7 +263,18 @@ function AuthRoute() {
 
 function ProjectsRoute() {
   const navigate = useNavigate();
-  return <ProjectsScreen onLogoClick={() => navigate('/')} onStartNewProject={(project) => navigate('/upload', { state: project ?? null })} onOpenProject={(projectId) => navigate(`/workspace/${projectId}`)} />;
+  const { reset } = useUploadSession();
+  return (
+    <ProjectsScreen
+      onLogoClick={() => navigate('/')}
+      onStartNewProject={(project) => {
+        // 새 프로젝트는 이전에 올린 영상·제목·장면 없이 빈 상태로 시작한다.
+        reset();
+        navigate('/upload', { state: project ?? null });
+      }}
+      onOpenProject={(projectId) => navigate(`/workspace/${projectId}`)}
+    />
+  );
 }
 
 export default function AppRouter() {

@@ -57,7 +57,7 @@ def draw1(ax):
     line(ax, Q, sp_cache, C_CACHE, "Feature Cache", "o")
     style(ax, Q, 18)
     ax.set_xlabel("Number of Queries")
-    ax.set_title("Multi-Query Processing", pad=64)
+    ax.set_title("Feature Caching", pad=64)
     ax.legend(loc="upper left", frameon=False, fontsize=FS - 1)
     ax.text(0.5, 1.10, "15.0× Faster", transform=ax.transAxes, ha="center",
             fontsize=FS + 4, fontweight="bold", color=C_CACHE)
