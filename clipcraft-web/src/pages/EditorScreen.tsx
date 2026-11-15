@@ -231,6 +231,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
   const [progress, setProgress] = useState(0.52);
   const [activeSegment, setActiveSegment] = useState<number | null>(null);
   const [exportState, setExportState] = useState<ExportState>('idle');
+  const [exportProgress, setExportProgress] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [muted, setMuted] = useState(false);
   const [segmentEditSettings, setSegmentEditSettings] = useState<SegmentEditSetting[]>(() =>
@@ -883,10 +884,11 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     if (exportState !== 'idle') return;
     if (!videoPath || segments.length === 0) return;
 
+    setExportProgress(0);
     setExportState('loading');
     try {
       const subtitleCues = exportWithSubtitles ? mapCuesToTimeline(subtitles, segments, segmentEditSettings, subtitleStyle.bilingual, subtitleStyle.showExtra) : [];
-      const blob = await requestExportVideo(videoPath, segments, segmentEditSettings, subtitleCues.length > 0 ? { cues: subtitleCues, style: subtitleStyle } : undefined);
+      const blob = await requestExportVideo(videoPath, segments, segmentEditSettings, subtitleCues.length > 0 ? { cues: subtitleCues, style: subtitleStyle } : undefined, undefined, setExportProgress);
       downloadExportedVideo(blob);
       setExportState('done');
       showExportToast('내보내기가 완료됐어요');
@@ -894,7 +896,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
     } catch (error) {
       console.error(error);
       setExportState('idle');
-      showExportToast('내보내기에 실패했습니다. 백엔드 서버와 영상 경로를 확인해 주세요.');
+      showExportToast(error instanceof Error && error.message ? `내보내기에 실패했어요: ${error.message}` : '내보내기에 실패했습니다. 백엔드 서버와 영상 경로를 확인해 주세요.');
     }
   };
 
@@ -1065,7 +1067,7 @@ export default function EditorWorkspace({ analysis, onBack, projectName, videoPa
           <Icon d={exportState === 'done' ? icons.check : icons.download} size={14} strokeWidth={1.6} />
           <span>
             {exportState === 'loading' ? (
-              '내보내는 중…'
+              exportProgress > 0 ? `내보내는 중… ${exportProgress}%` : '내보내는 중…'
             ) : exportState === 'done' ? (
               '완료!'
             ) : (

@@ -4,7 +4,7 @@ import os
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from app.database import init_db
@@ -457,6 +457,54 @@ async def export_video(request: Request):
         media_type=response.headers.get("content-type", "video/mp4"),
         headers=headers,
     )
+
+
+@app.post("/export/jobs")
+async def start_export_job(request: Request):
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"{GPU_SERVER_URL}/export/jobs",
+            content=await request.body(),
+            headers={"content-type": request.headers.get("content-type", "application/json")},
+        )
+
+    raise_upstream_error(response)
+    return response.json()
+
+
+@app.get("/export/jobs/{job_id}")
+async def get_export_job(job_id: str):
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(f"{GPU_SERVER_URL}/export/jobs/{job_id}")
+
+    raise_upstream_error(response)
+    return response.json()
+
+
+@app.get("/export/jobs/{job_id}/download")
+async def download_export_job(job_id: str):
+    # 결과 영상은 크기가 커서 한꺼번에 메모리에 올리지 않고 받는 대로 흘려 보낸다.
+    client = httpx.AsyncClient(timeout=None)
+    upstream = await client.send(client.build_request("GET", f"{GPU_SERVER_URL}/export/jobs/{job_id}/download"), stream=True)
+    if not upstream.is_success:
+        await upstream.aread()
+        await client.aclose()
+        raise_upstream_error(upstream)
+
+    async def stream():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    headers = {}
+    if content_disposition := upstream.headers.get("content-disposition"):
+        headers["content-disposition"] = content_disposition
+    if content_length := upstream.headers.get("content-length"):
+        headers["content-length"] = content_length
+    return StreamingResponse(stream(), media_type=upstream.headers.get("content-type", "video/mp4"), headers=headers)
 
 
 class ChatClip(BaseModel):

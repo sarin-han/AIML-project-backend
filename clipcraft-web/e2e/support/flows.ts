@@ -174,3 +174,42 @@ export async function runAnalysisFlow(page: Page) {
   await expect(page).toHaveURL(/\/editor\/mock-job$/);
   await expect(page.getByTestId('result-card')).toHaveCount(3);
 }
+
+/** 분석 결과에 영상 경로가 들어 있는 편집 화면까지 간다(내보내기 버튼은 영상 경로가 있어야 켜진다). */
+export async function openEditorWithVideoPath(page: Page) {
+  await mockAnalysisApi(page);
+  await page.route('**/analyze/jobs/mock-job', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: null,
+        logs: [],
+        message: 'mock analysis complete',
+        progress: 100,
+        project: projectName,
+        results: scenarios.map((scenario, index) => ({
+          audio: { amplitudes: Array.from({ length: 88 }, () => 0.5), barCount: 88, duration: 90 },
+          end: 20 + index * 20,
+          id: index + 1,
+          project_name: projectName,
+          scenario,
+          score: 0.9,
+          start: 12 + index * 20,
+          title: scenario,
+        })),
+        status: 'success',
+        step_id: 5,
+        step_label: '하이라이트 구간 확정',
+        video_path: '/tmp/mock-source.mp4',
+      }),
+    });
+  });
+  await createProject(page);
+  await uploadSampleVideo(page);
+  await addScenarios(page);
+  await page.getByTestId('analyze-start-button').click();
+  await expect(page).toHaveURL(/\/editor\/mock-job$/);
+  await expect(page.getByTestId('result-card')).toHaveCount(3);
+  await page.waitForTimeout(1000);
+}

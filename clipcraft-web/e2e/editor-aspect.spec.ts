@@ -55,8 +55,14 @@ test('export request never carries output_aspect (original ratio)', async ({ pag
   await page.waitForTimeout(800);
 
   const bodies: Array<Record<string, unknown>> = [];
-  await page.route('**/export', async (route) => {
+  await page.route('**/export/jobs', async (route) => {
     bodies.push(route.request().postDataJSON());
+    await route.fulfill({ body: JSON.stringify({ status: 'queued', job_id: 'j1' }), contentType: 'application/json', status: 200 });
+  });
+  await page.route('**/export/jobs/j1', async (route) => {
+    await route.fulfill({ body: JSON.stringify({ status: 'success', progress: 100 }), contentType: 'application/json', status: 200 });
+  });
+  await page.route('**/export/jobs/j1/download', async (route) => {
     await route.fulfill({ body: Buffer.from('mp4'), contentType: 'video/mp4', status: 200 });
   });
 

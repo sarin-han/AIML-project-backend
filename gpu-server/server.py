@@ -860,15 +860,16 @@ async def analyze(request: AnalysisRequest):
         "results": final_results
     }
 
-@app.post("/export")
-async def export_video(request: ExportRequest):
+def run_export(request: ExportRequest, export_id: Optional[str] = None, on_progress=None) -> str:
+    """영상을 내보내고 결과 파일 경로를 돌려준다. on_progress(진행한 단계, 전체 단계, 설명)로 진행 상황을 알린다.
+    임시 파일은 끝나면 지우고, 결과 파일만 남긴다(호출한 쪽이 지운다)."""
     import subprocess
-    from fastapi.responses import FileResponse
-    
+
     ffmpeg, ffprobe = get_ffmpeg_paths()
     temp_files = []
-    export_id = uuid.uuid4().hex
+    export_id = export_id or uuid.uuid4().hex
     tmp_dir = tempfile.gettempdir()
+    output_path = os.path.join(tmp_dir, f"clipcraft_{export_id}_output_final.mp4")
 
     def get_safe_speed(value: float) -> float:
         if not isinstance(value, (int, float)) or value <= 0:
@@ -922,6 +923,13 @@ async def export_video(request: ExportRequest):
             validate_subtitle_style(request.subtitle_style or SubtitleStyle())
 
         source_has_audio = has_audio_stream(request.video_path)
+        total_steps = len(request.segments) + 1 + (1 if subtitle_cues else 0)
+
+        def report(done: int, label: str) -> None:
+            if on_progress:
+                on_progress(done, total_steps, label)
+
+        report(0, "구간을 자르는 중")
 
         # 출력 비율이 지정되면 그 비율의 캔버스에 영상을 비율 유지로 넣는다(남는 곳은 검은 여백).
         canvas = None
@@ -1008,18 +1016,20 @@ async def export_video(request: ExportRequest):
 
             subprocess.run(command, check=True, capture_output=True)
             temp_files.append(temp_path)
+            report(i + 1, f"구간 {i + 1}/{len(request.segments)} 완료")
         
         list_file = os.path.join(tmp_dir, f"clipcraft_{export_id}_clips_list.txt")
         with open(list_file, "w") as f:
             for p in temp_files:
                 f.write(f"file '{p}'\n")
-        
-        output_path = os.path.join(tmp_dir, f"clipcraft_{export_id}_output_final.mp4")
+        temp_files.append(list_file)
+
         concat_path = os.path.join(tmp_dir, f"clipcraft_{export_id}_concat.mp4") if subtitle_cues else output_path
         subprocess.run([
             ffmpeg, "-y", "-f", "concat", "-safe", "0",
             "-i", list_file, "-c", "copy", concat_path
-        ], check=True)
+        ], check=True, capture_output=True)
+        report(len(request.segments) + 1, "구간을 이어 붙이는 중")
 
         if subtitle_cues:
             if not os.path.isdir(SUBTITLE_FONTS_DIR):
@@ -1036,9 +1046,114 @@ async def export_video(request: ExportRequest):
                 ffmpeg, "-y", "-i", concat_path, "-vf", subtitle_filter,
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "copy", output_path
             ], check=True, capture_output=True)
+            report(total_steps, "자막을 입히는 중")
 
-        return FileResponse(output_path, media_type="video/mp4", filename="clipcraft_export.mp4")
+        return output_path
     except HTTPException:
+        _remove_files([output_path])
         raise
     except Exception as e:
+        _remove_files([output_path])
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        _remove_files(temp_files)
+
+
+def _remove_files(paths) -> None:
+    for path in paths:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+# --- 내보내기 작업(비동기). 시작하면 바로 job_id를 돌려주고, 상태를 물어보다가 끝나면 내려받는다. ---
+EXPORT_JOB_TTL_SECONDS = 60 * 60
+export_jobs: dict[str, dict] = {}
+export_jobs_lock = threading.Lock()
+
+
+def _purge_old_export_jobs() -> None:
+    now = time.time()
+    with export_jobs_lock:
+        old = [job_id for job_id, job in export_jobs.items() if now - job["updated_at"] > EXPORT_JOB_TTL_SECONDS]
+        stale = [export_jobs.pop(job_id) for job_id in old]
+    _remove_files([job["output_path"] for job in stale if job.get("output_path")])
+
+
+def _update_export_job(job_id: str, **updates) -> None:
+    with export_jobs_lock:
+        job = export_jobs.get(job_id)
+        if job:
+            job.update(updates)
+            job["updated_at"] = time.time()
+
+
+def run_export_job(job_id: str, request: ExportRequest) -> None:
+    def on_progress(done: int, total: int, label: str) -> None:
+        # 마지막 단계가 끝나도 파일 정리가 남아 있어서 완료(100)는 작업이 끝난 뒤에만 표시한다.
+        _update_export_job(job_id, status="running", progress=min(95, int(done / max(1, total) * 95)), message=label)
+
+    try:
+        output_path = run_export(request, job_id, on_progress)
+    except HTTPException as error:
+        _update_export_job(job_id, status="error", error=str(error.detail), message="내보내기에 실패했어요.")
+    except Exception as error:
+        _update_export_job(job_id, status="error", error=str(error), message="내보내기에 실패했어요.")
+    else:
+        _update_export_job(job_id, status="success", progress=100, message="내보내기가 끝났어요.", output_path=output_path)
+
+
+@app.post("/export/jobs")
+def start_export_job(request: ExportRequest):
+    if not request.segments:
+        raise HTTPException(status_code=400, detail="No segments to export")
+
+    _purge_old_export_jobs()
+    job_id = uuid.uuid4().hex
+    with export_jobs_lock:
+        export_jobs[job_id] = {
+            "status": "queued",
+            "progress": 0,
+            "message": "내보내기 대기 중입니다.",
+            "error": None,
+            "output_path": None,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+        }
+    threading.Thread(target=run_export_job, args=(job_id, request), daemon=True).start()
+    return {"status": "queued", "job_id": job_id}
+
+
+@app.get("/export/jobs/{job_id}")
+def get_export_job(job_id: str):
+    with export_jobs_lock:
+        job = export_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Export job not found")
+        return {"status": job["status"], "progress": job["progress"], "message": job["message"], "error": job["error"]}
+
+
+@app.get("/export/jobs/{job_id}/download")
+def download_export_job(job_id: str):
+    from fastapi.responses import FileResponse
+
+    with export_jobs_lock:
+        job = export_jobs.get(job_id)
+        output_path = job.get("output_path") if job else None
+        status = job["status"] if job else None
+    if not job:
+        raise HTTPException(status_code=404, detail="Export job not found")
+    if status != "success" or not output_path or not os.path.isfile(output_path):
+        raise HTTPException(status_code=409, detail="내보내기가 아직 끝나지 않았어요.")
+    return FileResponse(output_path, media_type="video/mp4", filename="clipcraft_export.mp4")
+
+
+@app.post("/export")
+def export_video(request: ExportRequest):
+    """기존 방식(요청이 끝날 때까지 기다렸다가 파일을 바로 돌려준다). 새 화면은 /export/jobs를 쓴다."""
+    from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
+
+    output_path = run_export(request)
+    return FileResponse(output_path, media_type="video/mp4", filename="clipcraft_export.mp4", background=BackgroundTask(_remove_files, [output_path]))
