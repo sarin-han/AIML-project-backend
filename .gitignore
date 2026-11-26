@@ -17,5 +17,8 @@ ClipCraft-AI/
 # Playwright 결과물
 clipcraft-web/test-results/
 
+# GPU 프로세스 간 잠금 파일
+gpu-server/.gpu.lock
+
 # 로컬 DB
 backend/data/*.db
