@@ -54,6 +54,9 @@ from revisionllm.multiquery.service import MultiQueryGrounder, model_version_of 
 
 from progress import tracker  # noqa: E402
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # gpu-server/의 공용 모듈
+from gpu_lock import gpu_lock  # noqa: E402
+
 CLIP_PT = os.path.join(ROOT, "checkpoints/clip/ViT-L-14.pt")
 VICUNA = os.path.join(ROOT, "checkpoints/vicuna-7b-v1.5")
 STAGE2 = os.path.join(ROOT, "checkpoints/audio_charades_long/stageB_R2_seed0")
@@ -230,7 +233,7 @@ class Handler(BaseHTTPRequestHandler):
             if title is not None and not isinstance(title, str):
                 self._send(400, {"error": "title must be a string"})
                 return
-            with lock:
+            with lock, gpu_lock():  # gpu_lock: Whisper(GPU 서버)와 겹치지 않게
                 started = time.time()
                 tracker.begin(request_id, "highlights" if self.path == "/highlights" else "recommend")
                 try:
@@ -275,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(window, bool) or not isinstance(window, int) or not 10 <= window <= 2000:
                 self._send(400, {"error": "window must be an integer between 10 and 2000 (seconds)"})
                 return
-            with lock:
+            with lock, gpu_lock():  # gpu_lock: Whisper(GPU 서버)와 겹치지 않게
                 started = time.time()
                 grounder_module.DEBUG_WINDOW = window
                 tracker.begin(request_id, "ground")
@@ -300,6 +303,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    engine = Engine()
+    with gpu_lock():
+        engine = Engine()
     print(f"[revision] listening on http://{HOST}:{PORT}", flush=True)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()  # /health, /progress는 처리 중에도 응답한다

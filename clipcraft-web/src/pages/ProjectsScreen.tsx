@@ -6,6 +6,7 @@ import NewProjectCard from '@/components/ProjectsScreen/NewProjectCard';
 import ProjectCard from '@/components/ProjectsScreen/ProjectCard';
 import ProjectRow, { ProjectListHeader } from '@/components/ProjectsScreen/ProjectRow';
 import ProjectsPageHeader from '@/components/ProjectsScreen/ProjectsPageHeader';
+import ProjectsSkeleton from '@/components/ProjectsScreen/ProjectsSkeleton';
 import ProjectsToolbar from '@/components/ProjectsScreen/ProjectsToolbar';
 import ProjectsTopNav from '@/components/ProjectsScreen/ProjectsTopNav';
 import RenameProjectModal from '@/components/ProjectsScreen/RenameProjectModal';
@@ -163,9 +164,17 @@ export default function ProjectsScreen({ onLogoClick, onStartNewProject, onOpenP
   return (
     <div className="flex min-h-screen flex-col bg-[#fafafa]">
       <ProjectsTopNav onLogoClick={onLogoClick} />
-      <main className="mx-auto w-full max-w-[1440px] flex-1 px-10 pt-9 pb-20 max-[760px]:px-5">
-        <ProjectsPageHeader count={projects.length} onNewProject={() => startNewProject()} />
+      {/* 아래 여백: 맨 아래 카드의 점 세 개 메뉴가 페이지 안에서 끝까지 펼쳐질 자리 */}
+      <main className="mx-auto w-full max-w-[1440px] flex-1 px-10 pt-9 pb-60 max-[760px]:px-5">
+        <ProjectsPageHeader count={loaded ? projects.length : null} onNewProject={() => startNewProject()} />
         <ProjectsToolbar onQueryChange={setQuery} onSortChange={setSort} onViewChange={setView} query={query} sort={sort} view={view} />
+
+        {!loaded && (
+          <div className="mb-4 flex items-center justify-center gap-2.5 text-[13.5px] text-[rgba(0,0,0,0.55)]" data-testid="projects-loading" role="status">
+            <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-black/15 border-t-black/60" />
+            프로젝트를 불러오는 중이에요
+          </div>
+        )}
 
         {loaded && filteredProjects.length === 0 && query ? (
           <EmptySearchState onClear={() => setQuery('')} query={query} />
@@ -175,6 +184,7 @@ export default function ProjectsScreen({ onLogoClick, onStartNewProject, onOpenP
             {filteredProjects.map((project) => (
               <ProjectCard key={project.id} project={project} {...actionHandlers} />
             ))}
+            {!loaded && <ProjectsSkeleton view="grid" />}
           </div>
         ) : (
           <div className="flex flex-col gap-0.5 rounded-[14px] border border-[rgba(0,0,0,0.08)] bg-white p-2">
@@ -182,6 +192,7 @@ export default function ProjectsScreen({ onLogoClick, onStartNewProject, onOpenP
             {filteredProjects.map((project) => (
               <ProjectRow key={project.id} project={project} {...actionHandlers} />
             ))}
+            {!loaded && <ProjectsSkeleton view="list" />}
           </div>
         )}
       </main>

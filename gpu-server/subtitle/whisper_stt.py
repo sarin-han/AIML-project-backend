@@ -2,14 +2,13 @@ import glob
 import os
 import subprocess
 import tempfile
-import threading
+from contextlib import contextmanager
 from typing import Callable, Optional
+
+from gpu_lock import gpu_lock
 
 WHISPER_MODEL_PATH = os.environ.get("WHISPER_MODEL_PATH", "")
 WHISPER_CACHE_GLOB = "/shareHost/jiye_model/models--Systran--faster-whisper-large-v3/snapshots/*"
-
-_model = None
-_model_lock = threading.Lock()
 
 
 def _resolve_model_path() -> str:
@@ -45,16 +44,22 @@ def _preload_cuda_libs() -> None:
                     break
 
 
-def get_model():
-    global _model
-    if _model is None:
-        with _model_lock:
-            if _model is None:
-                _preload_cuda_libs()
-                from faster_whisper import WhisperModel
+@contextmanager
+def _loaded_model():
+    """Whisper를 GPU에 올려 빌려주고, 작업이 끝나면(실패해도) 내린다.
 
-                _model = WhisperModel(_resolve_model_path(), device="cuda", compute_type="float16")
-    return _model
+    같은 GPU를 ReVision 서비스가 함께 써서, 약 4GB인 Whisper를 계속 올려 두면 시나리오 탐색이 CUDA OOM으로 실패한다.
+    GPU 잠금을 올릴 때부터 내릴 때까지 잡아서 ReVision 작업이나 다른 자막 작업과 겹치지 않게 한다."""
+    with gpu_lock():
+        _preload_cuda_libs()
+        from faster_whisper import WhisperModel
+
+        model = WhisperModel(_resolve_model_path(), device="cuda", compute_type="float16")
+        try:
+            yield model
+        finally:
+            # 예외의 traceback 등이 객체를 붙잡고 있어도 GPU 메모리는 바로 반환되도록 명시적으로 내린다.
+            model.model.unload_model()
 
 
 def _extract_audio(ffmpeg: str, video_path: str, wav_path: str) -> None:
@@ -71,35 +76,35 @@ def transcribe_video(
     on_progress: Optional[Callable[[float], None]] = None,
 ) -> list[dict]:
     """영상의 음성을 인식해 [{id, start, end, text}] 구간 목록으로 반환한다."""
-    model = get_model()
-
     with tempfile.TemporaryDirectory() as tmp_dir:
         wav_path = os.path.join(tmp_dir, "audio.wav")
         _extract_audio(ffmpeg, video_path, wav_path)
 
-        segments, info = model.transcribe(
-            wav_path,
-            language=language,
-            vad_filter=True,
-            beam_size=5,
-            condition_on_previous_text=False,
-        )
-
-        results = []
-        for segment in segments:
-            text = segment.text.strip()
-            if not text:
-                continue
-
-            results.append(
-                {
-                    "id": len(results) + 1,
-                    "start": round(float(segment.start), 2),
-                    "end": round(float(segment.end), 2),
-                    "text": text,
-                }
+        with _loaded_model() as model:
+            segments, info = model.transcribe(
+                wav_path,
+                language=language,
+                vad_filter=True,
+                beam_size=5,
+                condition_on_previous_text=False,
             )
-            if on_progress and info.duration:
-                on_progress(min(1.0, float(segment.end) / float(info.duration)))
+
+            # segments는 순회할 때 인식이 진행되므로 모델을 내리기 전에 모두 읽는다.
+            results = []
+            for segment in segments:
+                text = segment.text.strip()
+                if not text:
+                    continue
+
+                results.append(
+                    {
+                        "id": len(results) + 1,
+                        "start": round(float(segment.start), 2),
+                        "end": round(float(segment.end), 2),
+                        "text": text,
+                    }
+                )
+                if on_progress and info.duration:
+                    on_progress(min(1.0, float(segment.end) / float(info.duration)))
 
     return results
