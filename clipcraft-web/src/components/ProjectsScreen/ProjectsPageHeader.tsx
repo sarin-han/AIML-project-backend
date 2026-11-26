@@ -2,7 +2,7 @@ import MonoLabel from '@/components/MonoLabel';
 import PillButton from '@/components/PillButton';
 
 interface ProjectsPageHeaderProps {
-  count: number;
+  count: number | null; // null = 아직 불러오는 중
   onNewProject: () => void;
 }
 
@@ -10,7 +10,7 @@ export default function ProjectsPageHeader({ count, onNewProject }: ProjectsPage
   return (
     <div className="mb-7 flex flex-wrap items-end justify-between gap-6">
       <div>
-        <MonoLabel className="mb-3 block">My Workspace · {count} projects</MonoLabel>
+        <MonoLabel className="mb-3 block">My Workspace · {count ?? '–'} projects</MonoLabel>
         <h1 className="mb-2 text-[42px] leading-[1.1] font-[620] tracking-[-1.2px] max-[520px]:text-[34px]">내 프로젝트</h1>
         <p className="text-[14.5px] leading-[1.55] tracking-[-0.15px] text-[rgba(0,0,0,0.45)]">
           작업 중인 영상을 이어서 편집하고, 새 프로젝트를 시작해보세요.

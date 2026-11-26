@@ -9,7 +9,8 @@ export default function NewProjectCard({ onClick }: { onClick: () => void }) {
   return (
     <button
       data-testid="new-project-card-button"
-      className="group flex cursor-pointer self-start animate-[fadeIn_0.25s_ease_both] flex-col overflow-hidden rounded-[14px] border-[1.5px] border-dashed outline-none transition-all hover:-translate-y-0.5"
+      // 구형 Safari(16 등)는 button의 기본 정렬이 flex-start라 items-stretch가 없으면 썸네일 영역이 아이콘 크기로 쪼그라든다.
+      className="group flex w-full cursor-pointer self-start animate-[fadeIn_0.25s_ease_both] flex-col items-stretch overflow-hidden rounded-[14px] border-[1.5px] border-dashed outline-none transition-all hover:-translate-y-0.5"
       onClick={onClick}
       style={{ background: 'rgba(0,0,0,0.018)', borderColor: 'rgba(0,0,0,0.14)' }}
       type="button"

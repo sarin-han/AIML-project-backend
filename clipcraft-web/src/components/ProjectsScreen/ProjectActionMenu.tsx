@@ -32,13 +32,16 @@ export default function ProjectActionMenu({ onDelete, onDuplicate, onRename, onT
     const dismiss = () => setOpen(false);
 
     document.addEventListener('mousedown', close);
-    window.addEventListener('scroll', dismiss, true);
     window.addEventListener('resize', dismiss);
     return () => {
       document.removeEventListener('mousedown', close);
-      window.removeEventListener('scroll', dismiss, true);
       window.removeEventListener('resize', dismiss);
     };
+  }, [open]);
+
+  // 화면 아래쪽 카드에서 열면 메뉴가 화면 밖으로 나가므로, 삭제까지 보이도록 페이지를 내린다.
+  useEffect(() => {
+    if (open) popupRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [open]);
 
   const items: MenuItem[] = [
@@ -55,7 +58,8 @@ export default function ProjectActionMenu({ onDelete, onDuplicate, onRename, onT
         onClick={(event) => {
           event.stopPropagation();
           const rect = event.currentTarget.getBoundingClientRect();
-          setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+          // 문서 기준 좌표: 메뉴가 페이지 길이에 포함되어 스크롤로 닿을 수 있고, 스크롤해도 버튼을 따라간다.
+          setPos({ top: rect.bottom + window.scrollY + 4, right: document.documentElement.clientWidth - rect.right - window.scrollX });
           setOpen((current) => !current);
         }}
         style={{ background: open ? 'rgba(0,0,0,0.07)' : 'transparent' }}
@@ -66,7 +70,7 @@ export default function ProjectActionMenu({ onDelete, onDuplicate, onRename, onT
       {open && pos && createPortal(
         <div
           ref={popupRef}
-          className="fixed z-[2000] min-w-[184px] rounded-[12px] border border-black/[0.14] p-1.5 text-black shadow-[0_18px_44px_rgba(0,0,0,0.18),0_4px_12px_rgba(0,0,0,0.1)] ring-1 ring-white"
+          className="absolute z-[2000] mb-3 min-w-[184px] scroll-mb-3 rounded-[12px] border border-black/[0.14] p-1.5 text-black shadow-[0_18px_44px_rgba(0,0,0,0.18),0_4px_12px_rgba(0,0,0,0.1)] ring-1 ring-white"
           onClick={(event) => event.stopPropagation()}
           style={{ backgroundColor: '#fff', backdropFilter: 'none', opacity: 1, top: pos.top, right: pos.right }}
         >
